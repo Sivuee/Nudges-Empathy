@@ -440,7 +440,7 @@ function SimonTracker({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void
 }
 
 function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
-  const hasData = analysis !== null && analysis.sections.some(s => s.visits > 0)
+  const hasData = analysis !== null && analysis.sections.some(s => score > 0)
   const tier = analysis?.averageTier ?? 'Verwarrend'
 
   return (
