@@ -275,16 +275,23 @@ const TIER_STYLE: Record<ReadingTier, { dot: string; text: string; bg: string; b
   Geweldig:   { dot: 'bg-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
 }
 
-const TIME_SATURATE_MS = 20_000
-const MOUSE_SATURATE   = 200
+// Reading time is the primary gate. A block must be viewed for at least
+// TIME_VERWARREND_MS before it can score above Verwarrend.
+// Time contributes 80 pts; scroll depth and mouse activity add up to 20 pts.
+const TIME_VERWARREND_MS = 8_000    // < 8 s → score 0 (Verwarrend)
+const TIME_GEWELDIG_MS   = 30_000   // ≥ 30 s → 80 pts on time alone
+const MOUSE_SATURATE     = 150
 
 function scoreFromMetrics(m: { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number } | undefined): number {
   if (!m) return 0
-  const time   = Math.min(40, Math.round((m.totalTimeMs    / TIME_SATURATE_MS) * 40))
-  const scroll = Math.min(35, Math.round( m.maxScrollDepth * 35))
-  const mouse  = Math.min(15, Math.round((m.mouseMovements / MOUSE_SATURATE)   * 15))
-  const visit  = m.visits >= 2 ? 10 : m.visits === 1 ? 5 : 0
-  return Math.min(100, time + scroll + mouse + visit)
+  // Hard gate: insufficient reading time
+  if (m.totalTimeMs < TIME_VERWARREND_MS) return 0
+  // Time: 0–80 pts (main factor)
+  const timeScore   = Math.min(80, Math.round((m.totalTimeMs / TIME_GEWELDIG_MS) * 80))
+  // Secondary signals: scroll depth up to 12 pts, mouse up to 8 pts
+  const scrollScore = Math.min(12, Math.round(m.maxScrollDepth * 12))
+  const mouseScore  = Math.min(8,  Math.round((m.mouseMovements / MOUSE_SATURATE) * 8))
+  return Math.min(100, timeScore + scrollScore + mouseScore)
 }
 
 function tierFromScore(score: number): ReadingTier {
@@ -328,26 +335,33 @@ function SimonTracker({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void
   return null
 }
 
+// SimonPanel — image left, text right (matching prototype screenshot).
+// No per-block tier rows. Sits inside the Max chat card, below the message bubble.
 function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
   const hasData = analysis !== null && analysis.sections.some(s => s.score > 0)
   const tier    = analysis?.averageTier ?? 'Verwarrend'
+  // Avatar emoji changes with tier once data arrives; placeholder until then
+  const avatar  = !hasData ? '🧑‍🎓' : tier === 'Verwarrend' ? '😕' : tier === 'Duidelijk' ? '🙂' : '😄'
 
   return (
-    <div className="rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
-      <div className="px-4 py-3 border-b border-blue-100">
+    <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-2.5 border-b border-blue-100">
         <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
-      <div className="px-4 py-4 flex items-start gap-3">
-        <div className="w-12 h-12 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-2xl select-none">
-          {!hasData ? '🧑‍🎓' : tier === 'Verwarrend' ? '😕' : tier === 'Duidelijk' ? '🙂' : '😄'}
+      {/* Body: image left, text right — always this layout */}
+      <div className="px-4 py-3 flex items-start gap-3">
+        {/* Avatar placeholder — replace src with your custom image */}
+        <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
+          {avatar}
         </div>
-        {!hasData ? (
-          <p className="text-xs text-gray-600 leading-relaxed pt-1">
-            De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
-          </p>
-        ) : (
-          <div className="flex-1 space-y-3">
-            <div>
+        <div className="flex-1 min-w-0">
+          {!hasData ? (
+            <p className="text-xs text-gray-600 leading-relaxed">
+              De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
+            </p>
+          ) : (
+            <>
               <p className="text-xs text-gray-600 leading-relaxed">
                 Simon heeft de tekst gelezen en vindt de tekst{' '}
                 <span className={`font-bold ${TIER_STYLE[tier].text}`}>{tier}.</span>
@@ -355,41 +369,31 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
               {tier !== 'Geweldig' && (
                 <p className="text-xs text-gray-600 mt-1 leading-relaxed">
                   Voor meer duidelijkheid, verifieer de{' '}
-                  <span className="font-bold text-gray-800">{analysis!.weakestLabel}</span>.
+                  <span className="font-bold text-gray-800">{analysis!.weakestLabel}</span>{' '}
+                  en de <span className="font-bold text-gray-800">Instructie</span>.
                 </p>
               )}
-            </div>
-            <div className="space-y-1.5">
-              {analysis!.sections.map(s => {
-                const st = TIER_STYLE[s.tier]
-                return (
-                  <div key={s.sectionId} className={`flex items-center justify-between rounded-lg px-3 py-2 border ${st.bg} ${st.border}`}>
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${st.dot}`} />
-                      <span className="text-xs font-medium text-gray-700">{s.label}</span>
-                    </div>
-                    <span className={`text-xs font-semibold ${st.text}`}>{s.tier}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-// Empathy variant of ChatPanel for LesTab — same outer structure, Simon added below Max message
+// Empathy variant of ChatPanel for LesTab.
+// Simon lives inside the Max card, directly below the message bubble.
 function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: ReadingAnalysis | null }) {
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-2/5 p-6 bg-white overflow-y-auto gap-4">
       <LesdoelCard lesdoel={lesdoel} />
       <div className="border border-gray-200 rounded-lg bg-white flex flex-col overflow-hidden">
+        {/* Max header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
           <div className="w-8 h-8 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
           <span className="text-sm font-medium">Max</span>
         </div>
+        {/* Max message bubble */}
         <div className="p-4">
           <div className="flex gap-2 items-end">
             <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
@@ -398,8 +402,9 @@ function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: Re
             </div>
           </div>
         </div>
+        {/* Simon nudge — in the same card, below the message */}
+        <SimonPanel analysis={analysis} />
       </div>
-      <SimonPanel analysis={analysis} />
     </div>
   )
 }
