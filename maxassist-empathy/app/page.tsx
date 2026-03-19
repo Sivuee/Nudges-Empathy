@@ -17,7 +17,6 @@ import {
   levenshteinDistance,
   detectErrorCorrections,
   LES_SECTION_IDS,
-  LES_SECTION_LABELS,
   buildReadingAnalysis,
   ReadingTier,
   ReadingAnalysis,
@@ -203,6 +202,7 @@ function AutorsomgevingScreen({
   setOutlinePhases,
   onShare,
   nudgeConfig,
+  condition,
 }: {
   activeTab: AuthoringTab
   setActiveTab: (t: AuthoringTab) => void
@@ -400,37 +400,41 @@ function LesoverzichtTab({ phases, onChange, nudgeConfig }: {
   )
 }
 
-// ─── Simon Nudge Panel ────────────────────────────────────────────────────────
-// Rendered below the textarea in LesTab when condition === 'empathy'.
+// ─── Simon Nudge (Empathy condition only) ─────────────────────────────────────
+// SimonTracker mounts after the LesTab renders, registers IntersectionObservers
+// on sentinel divs, and polls every 500ms to update the analysis state.
 
-const TIER_STYLE: Record<ReadingTier, { label: string; dot: string; text: string; bg: string; border: string }> = {
-  Verwarrend: { label: 'Verwarrend', dot: 'bg-red-500',    text: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200'   },
-  Duidelijk:  { label: 'Duidelijk',  dot: 'bg-amber-400',  text: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
-  Geweldig:   { label: 'Geweldig',   dot: 'bg-emerald-500',text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200'},
+const TIER_STYLE: Record<ReadingTier, { dot: string; text: string; bg: string; border: string }> = {
+  Verwarrend: { dot: 'bg-red-500',     text: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200'    },
+  Duidelijk:  { dot: 'bg-amber-400',   text: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200'  },
+  Geweldig:   { dot: 'bg-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
 }
 
-// Inner component: owns the tracker + polling. Mounts only after sentinels are in DOM.
-function SimonTrackerAndPanel({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void }) {
+function SimonTracker({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void }) {
   const { getSnapshot } = useReadingTracker([...LES_SECTION_IDS])
+  const onAnalysisRef = useRef(onAnalysis)
+  onAnalysisRef.current = onAnalysis
 
   useEffect(() => {
     const id = setInterval(() => {
       const snap = getSnapshot()
-      onAnalysis(buildReadingAnalysis(
-        snap.sections as Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
-      ))
+      onAnalysisRef.current(
+        buildReadingAnalysis(
+          snap.sections as Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
+        )
+      )
     }, 500)
     return () => clearInterval(id)
-  }, [getSnapshot, onAnalysis])
+  }, [getSnapshot])
 
-  // Invisible sentinel divs — one per section, positioned at known offsets.
-  // These are observed by useReadingTracker's IntersectionObserver.
+  // Invisible sentinel divs at proportional positions within the textarea scroll area.
+  // useReadingTracker's IntersectionObserver watches these via data-section-id.
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-      <div data-section-id="les-introductie" className="absolute top-[0%]   left-0 right-0 h-px opacity-0" />
-      <div data-section-id="les-instructie"  className="absolute top-[25%]  left-0 right-0 h-px opacity-0" />
-      <div data-section-id="les-verwerking"  className="absolute top-[62%]  left-0 right-0 h-px opacity-0" />
-      <div data-section-id="les-afronding"   className="absolute top-[82%]  left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-introductie" className="absolute top-[0%]  left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-instructie"  className="absolute top-[25%] left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-verwerking"  className="absolute top-[62%] left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-afronding"   className="absolute top-[82%] left-0 right-0 h-px opacity-0" />
     </div>
   )
 }
@@ -438,20 +442,16 @@ function SimonTrackerAndPanel({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis)
 function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
   const hasData = analysis !== null && analysis.sections.some(s => s.visits > 0)
   const tier = analysis?.averageTier ?? 'Verwarrend'
-  const tierStyle = TIER_STYLE[tier]
 
   return (
     <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
       <div className="px-4 py-3 border-b border-blue-100">
         <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
-
       <div className="px-4 py-4 flex items-start gap-3">
-        {/* Avatar */}
         <div className="w-12 h-12 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-2xl select-none">
           {!hasData ? '🧑‍🎓' : tier === 'Verwarrend' ? '😕' : tier === 'Duidelijk' ? '🙂' : '😄'}
         </div>
-
         {!hasData ? (
           <div className="flex-1">
             <p className="text-xs text-gray-600 leading-relaxed">
@@ -460,11 +460,10 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
           </div>
         ) : (
           <div className="flex-1 space-y-3">
-            {/* Verdict */}
             <div>
               <p className="text-xs text-gray-600 leading-relaxed">
                 Simon heeft de tekst gelezen en vindt de tekst{' '}
-                <span className={`font-bold ${tierStyle.text}`}>{tier}.</span>
+                <span className={`font-bold ${TIER_STYLE[tier].text}`}>{tier}.</span>
               </p>
               {tier !== 'Geweldig' && (
                 <p className="text-xs text-gray-600 mt-1 leading-relaxed">
@@ -473,8 +472,6 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
                 </p>
               )}
             </div>
-
-            {/* Per-block rows */}
             <div className="space-y-1.5">
               {analysis!.sections.map(s => {
                 const st = TIER_STYLE[s.tier]
@@ -505,11 +502,8 @@ function LesTab({ text, onChange, nudgeConfig, condition }: {
 }) {
   const [trackerMounted, setTrackerMounted] = useState(false)
   const [analysis, setAnalysis] = useState<ReadingAnalysis | null>(null)
-  // Stable ref so the interval callback never re-creates
-  const setAnalysisRef = useRef(setAnalysis)
-  const stableOnAnalysis = useCallback((a: ReadingAnalysis) => setAnalysisRef.current(a), [])
+  const stableSetAnalysis = useCallback((a: ReadingAnalysis) => setAnalysis(a), [])
 
-  // Mount tracker one frame after render so sentinel divs exist in DOM
   useEffect(() => {
     if (condition !== 'empathy') return
     const raf = requestAnimationFrame(() => setTrackerMounted(true))
@@ -527,11 +521,9 @@ function LesTab({ text, onChange, nudgeConfig, condition }: {
             </span>
           )}
         </div>
-
-        {/* Textarea — wrapped in relative div so sentinels can be positioned inside */}
         <div className="p-4 relative">
           {condition === 'empathy' && trackerMounted && (
-            <SimonTrackerAndPanel onAnalysis={stableOnAnalysis} />
+            <SimonTracker onAnalysis={stableSetAnalysis} />
           )}
           <textarea
             value={text}
@@ -540,8 +532,6 @@ function LesTab({ text, onChange, nudgeConfig, condition }: {
             spellCheck={true}
           />
         </div>
-
-        {/* Simon panel — only in empathy condition, below the textarea */}
         {condition === 'empathy' && (
           <SimonPanel analysis={analysis} />
         )}

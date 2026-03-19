@@ -278,33 +278,32 @@ export const NUDGE_CONFIGS: Record<ExperimentCondition, NudgeConfig> = {
 }
 
 // ============================================================
-// READING SCORE UTILITIES (Empathy condition only)
-// Converts useReadingTracker SectionMetrics into a 0–100 score
-// per block, then into a tier label.
+// READING SCORE UTILITIES — used by the Empathy nudge in LesTab
+// Converts useReadingTracker SectionMetrics into a 0–100 score.
 //
-// Score weights (100 pts total):
+// Weights:
 //   40 pts — time on section  (saturates at 20 s)
-//   35 pts — max scroll depth (0–1 linearly)
+//   35 pts — max scroll depth (0–1 linear)
 //   15 pts — mouse movements  (saturates at 200)
-//   10 pts — revisit bonus    (≥2 visits = full bonus, 1 visit = 5 pts)
+//   10 pts — revisit bonus    (≥2 visits = 10, 1 visit = 5, 0 = 0)
 // ============================================================
 
 const TIME_SATURATE_MS = 20_000
-const MOUSE_SATURATE   = 200
+const MOUSE_SATURATE = 200
 
 export type ReadingTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig'
 
 export interface SectionReading {
   sectionId: string
-  label:     string
-  score:     number
-  tier:      ReadingTier
+  label: string
+  score: number
+  tier: ReadingTier
 }
 
 export interface ReadingAnalysis {
-  sections:     SectionReading[]
+  sections: SectionReading[]
   averageScore: number
-  averageTier:  ReadingTier
+  averageTier: ReadingTier
   weakestLabel: string
 }
 
@@ -317,9 +316,9 @@ export const LES_SECTION_IDS = [
 
 export const LES_SECTION_LABELS: Record<string, string> = {
   'les-introductie': 'Introductie',
-  'les-instructie':  'Instructie',
-  'les-verwerking':  'Verwerking',
-  'les-afronding':   'Afronding',
+  'les-instructie': 'Instructie',
+  'les-verwerking': 'Verwerking',
+  'les-afronding': 'Afronding',
 }
 
 export function scoreFromMetrics(m: {
@@ -329,10 +328,10 @@ export function scoreFromMetrics(m: {
   visits: number
 } | undefined): number {
   if (!m) return 0
-  const time   = Math.min(40, Math.round((m.totalTimeMs    / TIME_SATURATE_MS) * 40))
-  const scroll = Math.min(35, Math.round( m.maxScrollDepth * 35))
-  const mouse  = Math.min(15, Math.round((m.mouseMovements / MOUSE_SATURATE)   * 15))
-  const visit  = m.visits >= 2 ? 10 : m.visits === 1 ? 5 : 0
+  const time = Math.min(40, Math.round((m.totalTimeMs / TIME_SATURATE_MS) * 40))
+  const scroll = Math.min(35, Math.round(m.maxScrollDepth * 35))
+  const mouse = Math.min(15, Math.round((m.mouseMovements / MOUSE_SATURATE) * 15))
+  const visit = m.visits >= 2 ? 10 : m.visits === 1 ? 5 : 0
   return Math.min(100, time + scroll + mouse + visit)
 }
 
@@ -350,7 +349,7 @@ export function buildReadingAnalysis(
     return { sectionId: id, label: LES_SECTION_LABELS[id], score, tier: tierFromScore(score) }
   })
   const averageScore = Math.round(sections.reduce((s, r) => s + r.score, 0) / sections.length)
-  const averageTier  = tierFromScore(averageScore)
-  const weakest      = sections.reduce((min, r) => r.score < min.score ? r : min, sections[0])
+  const averageTier = tierFromScore(averageScore)
+  const weakest = sections.reduce((min, r) => r.score < min.score ? r : min, sections[0])
   return { sections, averageScore, averageTier, weakestLabel: weakest.label }
 }
