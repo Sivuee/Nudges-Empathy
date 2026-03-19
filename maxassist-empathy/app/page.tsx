@@ -844,7 +844,9 @@ function ExperimentEndScreen({ qualtricsUrl }: { qualtricsUrl: string }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-export default function ExperimentApp() {
+import { Suspense } from 'react'
+
+function ExperimentApp() {
   const searchParams = useSearchParams()
 
   // This deployment is always the Empathy condition.
@@ -966,5 +968,13 @@ export default function ExperimentApp() {
         />
       )}
     </div>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense>
+      <ExperimentApp />
+    </Suspense>
   )
 }
