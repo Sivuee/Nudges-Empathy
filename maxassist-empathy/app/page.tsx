@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   BASELINE_LESDETAILS,
@@ -9,13 +9,15 @@ import {
   BASELINE_LES,
   CORRECT_LESPLAN,
   CORRECT_LES,
+  CORRECT_LESOVERZICHT_ORDER,
   EXPERIMENT_CONFIG,
   ExperimentCondition,
-  NUDGE_CONFIGS,
   NudgeConfig,
+  NUDGE_CONFIGS,
   levenshteinDistance,
   detectErrorCorrections,
   LES_SECTION_IDS,
+  LES_SECTION_LABELS,
   buildReadingAnalysis,
   ReadingTier,
   ReadingAnalysis,
@@ -30,6 +32,7 @@ import {
   FileText,
   Eye,
   Users,
+  GripVertical,
   AlertTriangle,
   CheckCircle,
   Info,
@@ -128,7 +131,7 @@ function FieldBlock({ label, children }: { label: string; children: React.ReactN
 }
 
 // ─── Lesdetails Screen ────────────────────────────────────────────────────────
-function LesdetailsScreen({ onComplete }: {
+function LesdetailsScreen({ onComplete, participantId }: {
   onComplete: () => void
   participantId: string
 }) {
@@ -200,7 +203,6 @@ function AutorsomgevingScreen({
   setOutlinePhases,
   onShare,
   nudgeConfig,
-  condition,
 }: {
   activeTab: AuthoringTab
   setActiveTab: (t: AuthoringTab) => void
@@ -223,6 +225,7 @@ function AutorsomgevingScreen({
 
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+      {/* Warning banner (nudge condition) */}
       {nudgeConfig.showWarningBanner && (
         <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-3">
           <AlertTriangle size={18} className="text-amber-600 flex-shrink-0" />
@@ -257,10 +260,18 @@ function AutorsomgevingScreen({
 
       <div className="flex-1 overflow-auto bg-gray-50">
         {activeTab === 'lesplan' && (
-          <LesplanTab text={lesplanText} onChange={setLesplanText} nudgeConfig={nudgeConfig} />
+          <LesplanTab
+            text={lesplanText}
+            onChange={setLesplanText}
+            nudgeConfig={nudgeConfig}
+          />
         )}
         {activeTab === 'lesoverzicht' && (
-          <LesoverzichtTab phases={outlinePhases} onChange={setOutlinePhases} nudgeConfig={nudgeConfig} />
+          <LesoverzichtTab
+            phases={outlinePhases}
+            onChange={setOutlinePhases}
+            nudgeConfig={nudgeConfig}
+          />
         )}
         {activeTab === 'les' && (
           <LesTab
@@ -389,120 +400,91 @@ function LesoverzichtTab({ phases, onChange, nudgeConfig }: {
   )
 }
 
-// ─── Simon Tier Config ────────────────────────────────────────────────────────
-const TIER_CONFIG: Record<ReadingTier, {
-  color: string; bg: string; border: string; dot: string; emoji: string
-}> = {
-  Verwarrend: {
-    color:  'text-red-600',
-    bg:     'bg-red-50',
-    border: 'border-red-200',
-    dot:    'bg-red-500',
-    emoji:  '😕',
-  },
-  Duidelijk: {
-    color:  'text-amber-600',
-    bg:     'bg-amber-50',
-    border: 'border-amber-200',
-    dot:    'bg-amber-400',
-    emoji:  '🙂',
-  },
-  Geweldig: {
-    color:  'text-emerald-600',
-    bg:     'bg-emerald-50',
-    border: 'border-emerald-200',
-    dot:    'bg-emerald-500',
-    emoji:  '😄',
-  },
+// ─── Simon Nudge Panel ────────────────────────────────────────────────────────
+// Rendered below the textarea in LesTab when condition === 'empathy'.
+
+const TIER_STYLE: Record<ReadingTier, { label: string; dot: string; text: string; bg: string; border: string }> = {
+  Verwarrend: { label: 'Verwarrend', dot: 'bg-red-500',    text: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200'   },
+  Duidelijk:  { label: 'Duidelijk',  dot: 'bg-amber-400',  text: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200' },
+  Geweldig:   { label: 'Geweldig',   dot: 'bg-emerald-500',text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200'},
 }
 
-// ─── Simon Nudge Panel ────────────────────────────────────────────────────────
-function SimonNudgePanel({ analysis }: { analysis: ReadingAnalysis | null }) {
+// Inner component: owns the tracker + polling. Mounts only after sentinels are in DOM.
+function SimonTrackerAndPanel({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void }) {
+  const { getSnapshot } = useReadingTracker([...LES_SECTION_IDS])
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const snap = getSnapshot()
+      onAnalysis(buildReadingAnalysis(
+        snap.sections as Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
+      ))
+    }, 500)
+    return () => clearInterval(id)
+  }, [getSnapshot, onAnalysis])
+
+  // Invisible sentinel divs — one per section, positioned at known offsets.
+  // These are observed by useReadingTracker's IntersectionObserver.
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      <div data-section-id="les-introductie" className="absolute top-[0%]   left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-instructie"  className="absolute top-[25%]  left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-verwerking"  className="absolute top-[62%]  left-0 right-0 h-px opacity-0" />
+      <div data-section-id="les-afronding"   className="absolute top-[82%]  left-0 right-0 h-px opacity-0" />
+    </div>
+  )
+}
+
+function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
   const hasData = analysis !== null && analysis.sections.some(s => s.visits > 0)
+  const tier = analysis?.averageTier ?? 'Verwarrend'
+  const tierStyle = TIER_STYLE[tier]
 
   return (
-    <aside className="w-72 flex-shrink-0 flex flex-col gap-3 py-6 pr-4 pl-1 overflow-y-auto">
-      {/* Max header card — matches screenshot */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="flex items-center px-4 py-3 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-maxGreen rounded-full flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-[10px] font-bold">M</span>
-            </div>
-            <span className="text-sm font-semibold text-gray-800">Max</span>
-          </div>
-        </div>
-        <div className="px-4 py-4 space-y-2">
-          <p className="text-sm font-semibold text-gray-800">Je lesbasis staat klaar!</p>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
-          </p>
-        </div>
+    <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
+      <div className="px-4 py-3 border-b border-blue-100">
+        <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
 
-      {/* Simon de virtuele student card */}
-      <div className="bg-blue-50 rounded-xl border border-blue-100 shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-blue-100">
-          <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
+      <div className="px-4 py-4 flex items-start gap-3">
+        {/* Avatar */}
+        <div className="w-12 h-12 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-2xl select-none">
+          {!hasData ? '🧑‍🎓' : tier === 'Verwarrend' ? '😕' : tier === 'Duidelijk' ? '🙂' : '😄'}
         </div>
 
         {!hasData ? (
-          <div className="px-4 py-4 flex items-start gap-3">
-            {/* Placeholder avatar */}
-            <div className="w-12 h-12 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-2xl select-none">
-              🧑‍🎓
-            </div>
-            <div>
-              <p className="text-xs text-gray-600 leading-relaxed">
-                Simon leest mee terwijl jij door de les scrollt. Scroll door de tekst om een leesscore te zien.
-              </p>
-            </div>
+          <div className="flex-1">
+            <p className="text-xs text-gray-600 leading-relaxed">
+              De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
+            </p>
           </div>
         ) : (
-          <div className="px-4 py-4 space-y-3">
-            {/* Avatar + verdict */}
-            <div className="flex items-start gap-3">
-              <div className="w-12 h-12 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-2xl select-none">
-                {TIER_CONFIG[analysis!.averageTier].emoji}
-              </div>
-              <div className="flex-1">
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  Simon heeft de tekst gelezen en vindt de tekst{' '}
-                  <span className={cn('font-bold', TIER_CONFIG[analysis!.averageTier].color)}>
-                    {analysis!.averageTier}.
-                  </span>
+          <div className="flex-1 space-y-3">
+            {/* Verdict */}
+            <div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Simon heeft de tekst gelezen en vindt de tekst{' '}
+                <span className={`font-bold ${tierStyle.text}`}>{tier}.</span>
+              </p>
+              {tier !== 'Geweldig' && (
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                  Voor meer duidelijkheid, verifieer de{' '}
+                  <span className="font-bold text-gray-800">{analysis!.weakestLabel}</span>.
                 </p>
-                {analysis!.averageTier !== 'Geweldig' && (
-                  <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
-                    Voor meer duidelijkheid, verifieer de{' '}
-                    <span className="font-bold text-gray-800">{analysis!.weakestLabel}</span>{' '}
-                    en de{' '}
-                    <span className="font-bold text-gray-800">Instructie</span>.
-                  </p>
-                )}
-              </div>
+              )}
             </div>
 
-            {/* Per-block score rows */}
-            <div className="space-y-1.5 pt-1">
-              {analysis!.sections.map((section) => {
-                const cfg = TIER_CONFIG[section.tier]
+            {/* Per-block rows */}
+            <div className="space-y-1.5">
+              {analysis!.sections.map(s => {
+                const st = TIER_STYLE[s.tier]
                 return (
-                  <div
-                    key={section.sectionId}
-                    className={cn(
-                      'flex items-center justify-between rounded-lg px-3 py-2 border',
-                      cfg.bg,
-                      cfg.border
-                    )}
-                  >
+                  <div key={s.sectionId} className={`flex items-center justify-between rounded-lg px-3 py-2 border ${st.bg} ${st.border}`}>
                     <div className="flex items-center gap-2">
-                      <span className={cn('w-2 h-2 rounded-full flex-shrink-0', cfg.dot)} />
-                      <span className="text-xs font-medium text-gray-700">{section.label}</span>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${st.dot}`} />
+                      <span className="text-xs font-medium text-gray-700">{s.label}</span>
                     </div>
-                    <span className={cn('text-xs font-semibold', cfg.color)}>
-                      {section.tier}
-                    </span>
+                    <span className={`text-xs font-semibold ${st.text}`}>{s.tier}</span>
                   </div>
                 )
               })}
@@ -510,128 +492,6 @@ function SimonNudgePanel({ analysis }: { analysis: ReadingAnalysis | null }) {
           </div>
         )}
       </div>
-    </aside>
-  )
-}
-
-// ─── Reading Tracker Layer ────────────────────────────────────────────────────
-// Renders invisible sentinel divs at proportional positions in the scroll
-// container so IntersectionObserver can detect which block is in view.
-// Polls getSnapshot() every 500 ms and fires onAnalysis.
-function ReadingTrackerLayer({
-  text,
-  onAnalysis,
-}: {
-  text: string
-  onAnalysis: (a: ReadingAnalysis) => void
-}) {
-  // useReadingTracker must be called at component top level (Rules of Hooks)
-  const { getSnapshot } = useReadingTracker([...LES_SECTION_IDS])
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      const snap = getSnapshot()
-      const analysis = buildReadingAnalysis(
-        snap.sections as Record<string, {
-          totalTimeMs: number
-          maxScrollDepth: number
-          mouseMovements: number
-          visits: number
-        }>
-      )
-      onAnalysis(analysis)
-    }, 500)
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [getSnapshot, onAnalysis])
-
-  // Compute proportional top-offsets for each sentinel based on keyword positions
-  const lower = text.toLowerCase()
-  const totalLen = Math.max(1, text.length)
-
-  const pct = (keyword: string, fallback: number) => {
-    const i = lower.indexOf(keyword)
-    return i > 0 ? Math.round((i / totalLen) * 100) : fallback
-  }
-
-  const tops: Record<string, number> = {
-    'les-introductie': 0,
-    'les-instructie':  pct('vier pijlers', 25),
-    'les-verwerking':  pct('opdracht', 62),
-    'les-afronding':   pct('afronding', 82),
-  }
-
-  return (
-    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      {LES_SECTION_IDS.map((id) => (
-        <div
-          key={id}
-          data-section-id={id}
-          className="absolute left-0 right-0"
-          style={{ top: `${tops[id]}%`, height: '1px', opacity: 0 }}
-        />
-      ))}
-    </div>
-  )
-}
-
-// ─── Les Tab with Empathy Sidebar ─────────────────────────────────────────────
-function LesTabEmpathy({
-  text,
-  onChange,
-  nudgeConfig,
-}: {
-  text: string
-  onChange: (s: string) => void
-  nudgeConfig: NudgeConfig
-}) {
-  const [trackerMounted, setTrackerMounted] = useState(false)
-  const [analysis, setAnalysis] = useState<ReadingAnalysis | null>(null)
-
-  // Delay mounting the tracker layer by one frame so sentinels are in the DOM
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setTrackerMounted(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
-
-  // Stable callback ref — avoids re-rendering ReadingTrackerLayer on every analysis update
-  const onAnalysisRef = useRef(setAnalysis)
-  onAnalysisRef.current = setAnalysis
-  const stableOnAnalysis = useCallback((a: ReadingAnalysis) => onAnalysisRef.current(a), [])
-
-  return (
-    <div className="flex h-full">
-      {/* Editor column */}
-      <div className="flex-1 min-w-0 py-6 px-4">
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-full">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
-            <h3 className="font-semibold text-gray-800">Les</h3>
-            {nudgeConfig.showAccuracyBadge && (
-              <span className="flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-full">
-                <Info size={11} /> {nudgeConfig.accuracyBadgeText}
-              </span>
-            )}
-          </div>
-
-          {/* Scrollable area — contains textarea + invisible sentinels */}
-          <div className="relative flex-1 overflow-auto">
-            {trackerMounted && (
-              <ReadingTrackerLayer text={text} onAnalysis={stableOnAnalysis} />
-            )}
-            <div className="p-4">
-              <textarea
-                value={text}
-                onChange={(e) => onChange(e.target.value)}
-                className="w-full min-h-[600px] text-sm text-gray-700 leading-relaxed resize-y border-0 outline-none font-mono bg-transparent"
-                spellCheck={true}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Simon sidebar */}
-      <SimonNudgePanel analysis={analysis} />
     </div>
   )
 }
@@ -643,9 +503,18 @@ function LesTab({ text, onChange, nudgeConfig, condition }: {
   nudgeConfig: NudgeConfig
   condition: ExperimentCondition
 }) {
-  if (condition === 'empathy') {
-    return <LesTabEmpathy text={text} onChange={onChange} nudgeConfig={nudgeConfig} />
-  }
+  const [trackerMounted, setTrackerMounted] = useState(false)
+  const [analysis, setAnalysis] = useState<ReadingAnalysis | null>(null)
+  // Stable ref so the interval callback never re-creates
+  const setAnalysisRef = useRef(setAnalysis)
+  const stableOnAnalysis = useCallback((a: ReadingAnalysis) => setAnalysisRef.current(a), [])
+
+  // Mount tracker one frame after render so sentinel divs exist in DOM
+  useEffect(() => {
+    if (condition !== 'empathy') return
+    const raf = requestAnimationFrame(() => setTrackerMounted(true))
+    return () => cancelAnimationFrame(raf)
+  }, [condition])
 
   return (
     <div className="max-w-3xl mx-auto py-6 px-4">
@@ -658,14 +527,24 @@ function LesTab({ text, onChange, nudgeConfig, condition }: {
             </span>
           )}
         </div>
-        <div className="p-4">
+
+        {/* Textarea — wrapped in relative div so sentinels can be positioned inside */}
+        <div className="p-4 relative">
+          {condition === 'empathy' && trackerMounted && (
+            <SimonTrackerAndPanel onAnalysis={stableOnAnalysis} />
+          )}
           <textarea
             value={text}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full min-h-[600px] text-sm text-gray-700 leading-relaxed resize-y border-0 outline-none font-mono bg-transparent"
+            className="w-full min-h-[600px] text-sm text-gray-700 leading-relaxed resize-y border-0 outline-none font-mono bg-transparent relative z-10"
             spellCheck={true}
           />
         </div>
+
+        {/* Simon panel — only in empathy condition, below the textarea */}
+        {condition === 'empathy' && (
+          <SimonPanel analysis={analysis} />
+        )}
       </div>
     </div>
   )
@@ -678,27 +557,30 @@ function VoorvertoningTab({ lesplan, les, phases, lesdetails }: {
   phases: OutlinePhase[]
   lesdetails: typeof BASELINE_LESDETAILS
 }) {
+  // Simple markdown-like renderer
   const renderMarkdown = (text: string) => {
     return text.split('\n').map((line, i) => {
-      if (line.startsWith('## '))   return <h2 key={i} className="text-xl font-bold text-gray-900 mt-6 mb-2">{line.slice(3)}</h2>
-      if (line.startsWith('### '))  return <h3 key={i} className="text-lg font-semibold text-gray-800 mt-4 mb-2">{line.slice(4)}</h3>
+      if (line.startsWith('## ')) return <h2 key={i} className="text-xl font-bold text-gray-900 mt-6 mb-2">{line.slice(3)}</h2>
+      if (line.startsWith('### ')) return <h3 key={i} className="text-lg font-semibold text-gray-800 mt-4 mb-2">{line.slice(4)}</h3>
       if (line.startsWith('#### ')) return <h4 key={i} className="text-base font-semibold text-gray-700 mt-3 mb-1">{line.slice(5)}</h4>
       if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-bold text-gray-800 mt-2">{line.slice(2, -2)}</p>
-      if (line.startsWith('- '))    return <li key={i} className="ml-4 text-sm text-gray-600">{line.slice(2)}</li>
-      if (line.startsWith('---'))   return <hr key={i} className="my-4 border-gray-200" />
-      if (line.trim() === '')       return <br key={i} />
+      if (line.startsWith('- ')) return <li key={i} className="ml-4 text-sm text-gray-600">{line.slice(2)}</li>
+      if (line.startsWith('---')) return <hr key={i} className="my-4 border-gray-200" />
+      if (line.trim() === '') return <br key={i} />
       return <p key={i} className="text-sm text-gray-700">{line}</p>
     })
   }
 
   return (
     <div className="max-w-3xl mx-auto py-6 px-4 space-y-6">
+      {/* Header card */}
       <div className="bg-maxGreen text-white rounded-xl p-6">
         <p className="text-sm opacity-80 mb-1">{lesdetails.doelgroep}</p>
         <h2 className="text-xl font-bold mb-2">{lesdetails.onderwerp}</h2>
         <p className="text-sm opacity-90">{lesdetails.lesdoel}</p>
       </div>
 
+      {/* Lesplan */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
         <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
           <BookOpen size={16} className="text-maxGreen" /> Lesplan
@@ -706,6 +588,7 @@ function VoorvertoningTab({ lesplan, les, phases, lesdetails }: {
         <div className="prose prose-sm max-w-none">{renderMarkdown(lesplan)}</div>
       </div>
 
+      {/* Lesoverzicht */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
         <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
           <ListOrdered size={16} className="text-maxGreen" /> Lesoverzicht
@@ -725,6 +608,7 @@ function VoorvertoningTab({ lesplan, les, phases, lesdetails }: {
         </div>
       </div>
 
+      {/* Les body */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
         <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
           <FileText size={16} className="text-maxGreen" /> Les
@@ -844,25 +728,27 @@ function ExperimentEndScreen({ qualtricsUrl }: { qualtricsUrl: string }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-import { Suspense } from 'react'
-
 function ExperimentApp() {
   const searchParams = useSearchParams()
 
-  // This deployment is always the Empathy condition.
+  // This deployment is always the Empathy condition
   const condition: ExperimentCondition = 'empathy'
   const participantId = searchParams.get('pid') ?? `anon-${Date.now()}`
+
   const nudgeConfig = NUDGE_CONFIGS[condition]
 
+  // App state
   const [phase, setPhase] = useState<AppPhase>('lesdetails')
   const [activeAuthoringTab, setActiveAuthoringTab] = useState<AuthoringTab>('lesplan')
   const [showShareModal, setShowShareModal] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
+  // Editable content state — initialized from baseline content
   const [lesplanText, setLesplanText] = useState(BASELINE_LESPLAN)
   const [lesText, setLesText] = useState(BASELINE_LES)
   const [outlinePhases, setOutlinePhases] = useState<OutlinePhase[]>(BASELINE_LESOVERZICHT.phases)
 
+  // Track time spent in authoring environment
   const authoringStartTime = useRef<number | null>(null)
   useEffect(() => {
     if (phase === 'auteursomgeving' && authoringStartTime.current === null) {
@@ -870,11 +756,13 @@ function ExperimentApp() {
     }
   }, [phase])
 
+  // ─── Submit experiment data ──────────────────────────────────────────────
   const submitExperimentData = useCallback(async () => {
     if (submitted) return
 
     const timeSpentMs = authoringStartTime.current ? Date.now() - authoringStartTime.current : 0
 
+    // Compute Levenshtein distances
     const levLesplan = levenshteinDistance(
       CORRECT_LESPLAN.replace(/\s+/g, ' ').trim(),
       lesplanText.replace(/\s+/g, ' ').trim()
@@ -885,6 +773,7 @@ function ExperimentApp() {
     )
     const levTotal = levLesplan + levLes
 
+    // Compute error corrections
     const finalOutlineOrder = outlinePhases.map((p) => p.title)
     const errorStats = detectErrorCorrections(lesplanText, lesText, finalOutlineOrder)
 
@@ -893,15 +782,18 @@ function ExperimentApp() {
       condition,
       timestamp: new Date().toISOString(),
       time_in_authoring_ms: timeSpentMs,
+      // Levenshtein distances (lower = closer to correct version = more engagement)
       levenshtein_lesplan: levLesplan,
       levenshtein_les: levLes,
       levenshtein_total: levTotal,
+      // Error correction rates
       error_1_fixed_spelling: errorStats.error1Fixed,
       error_2_fixed_order: errorStats.error2Fixed,
       error_3_fixed_factual: errorStats.error3Fixed,
       error_4_fixed_grammar: errorStats.error4Fixed,
       total_errors_fixed: errorStats.totalFixed,
       error_correction_rate: errorStats.totalFixed / 4,
+      // Final text for manual inspection
       final_lesplan: lesplanText,
       final_les: lesText,
       final_outline_order: finalOutlineOrder.join(' → '),
@@ -916,16 +808,18 @@ function ExperimentApp() {
       setSubmitted(true)
     } catch (e) {
       console.error('Formspree submission failed:', e)
-      setSubmitted(true)
+      setSubmitted(true) // Still proceed to end screen
     }
   }, [participantId, condition, lesplanText, lesText, outlinePhases, submitted])
 
+  // ─── Handle "Deel met collega" click ────────────────────────────────────
   const handleDeelMetCollega = useCallback(async () => {
     setShowShareModal(false)
     await submitExperimentData()
     setPhase('experiment_end')
   }, [submitExperimentData])
 
+  // ─── Render ──────────────────────────────────────────────────────────────
   if (phase === 'experiment_end') {
     return <ExperimentEndScreen qualtricsUrl={EXPERIMENT_CONFIG.QUALTRICS_URL} />
   }

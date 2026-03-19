@@ -11,9 +11,9 @@ export const EXPERIMENT_CONFIG = {
   // Formspree endpoint — replace with your actual Formspree form ID
   FORMSPREE_ENDPOINT: 'https://formspree.io/f/YOUR_FORM_ID',
 
-  // Condition is fixed to 'empathy' for this deployment.
-  // Qualtrics should link participants here with no condition param needed.
-  DEFAULT_CONDITION: 'empathy' as ExperimentCondition,
+  // Condition is passed via URL query param: ?condition=baseline|nudge_transparency|nudge_warning
+  // See README for how to randomize conditions in Qualtrics
+  DEFAULT_CONDITION: 'baseline' as ExperimentCondition,
 }
 
 export type ExperimentCondition = 'baseline' | 'nudge_transparency' | 'nudge_warning' | 'empathy'
@@ -30,8 +30,19 @@ export const BASELINE_LESDETAILS = {
 
 // ============================================================
 // BASELINE LESSON CONTENT WITH INTENTIONAL ERRORS
+//
+// ERRORS INTRODUCED (for error correction rate measurement):
+//   1. Lesplan  — "actief luisteren" misspelled as "aktief luisterren"
+//   2. Lesoverzicht — wrong phase order: verwerking listed before instructie
+//   3. Les (body) — factual error: "non-verbale communicatie is 10% van communicatie"
+//      (correct is ~55-93% according to Mehrabian — common misconception)
+//   4. Les (body) — grammar error: "de cliënt voelt zich begrepen voelen"
+//
+// Document the ORIGINAL (correct) versions below as BASELINE_CORRECT
+// so you can compute Levenshtein distance against the participant's final text.
 // ============================================================
 
+// The pre-generated lesson plan text (Tab: Lesplan)
 export const BASELINE_LESPLAN = `**Lesplan: Effectieve communicatie met cliënten in de zorg**
 
 **Doelgroep:** MBO niveau 3, Zorg & Welzijn
@@ -56,7 +67,9 @@ Studenten oefenen in tweetallen met rollenspellen. Één student speelt de zorgv
 **Fase 4 – Afronding (10 min)**
 Klassikale nabespreking. Studenten benoemen één concrete techniek die ze morgen in de stage willen toepassen.`
 
+// The pre-generated lesson outline (Tab: Lesoverzicht)
 export const BASELINE_LESOVERZICHT = {
+  // ERROR_2: verwerking is listed before instructie in the rendered order
   phases: [
     {
       title: 'Introductie',
@@ -67,7 +80,7 @@ export const BASELINE_LESOVERZICHT = {
       ],
     },
     {
-      title: 'Verwerking',
+      title: 'Verwerking', // ERROR_2: should be Instructie first, then Verwerking
       description: 'Oefen met de nieuwe kennis',
       topics: [
         'Rollenspel in tweetallen (2x 10 min)',
@@ -75,7 +88,7 @@ export const BASELINE_LESOVERZICHT = {
       ],
     },
     {
-      title: 'Instructie',
+      title: 'Instructie', // ERROR_2: this is out of order
       description: 'Leg nieuwe kennis en concepten uit',
       topics: [
         'De vier pijlers van zorggericht communiceren',
@@ -94,6 +107,7 @@ export const BASELINE_LESOVERZICHT = {
   ],
 }
 
+// The pre-generated lesson body (Tab: Les)
 export const BASELINE_LES = `## Effectieve communicatie met cliënten in de zorg
 
 ### Inleiding
@@ -139,6 +153,7 @@ Werk in tweetallen. Gebruik de situatiekaarten die je van de docent krijgt. Vul 
 
 // ============================================================
 // CORRECT BASELINE (ground truth for Levenshtein distance)
+// This is what the text SHOULD look like if all errors are fixed.
 // ============================================================
 export const CORRECT_LESPLAN = BASELINE_LESPLAN
   .replace('Aktief luisterren', 'Actief luisteren')
@@ -154,6 +169,7 @@ export const CORRECT_LES = BASELINE_LES
     'Wist je dat non-verbale communicatie 55–93% van je totale boodschap uitmaakt?'
   )
 
+// Correct outline has phases in the right order: intro, instructie, verwerking, afronding
 export const CORRECT_LESOVERZICHT_ORDER = ['Introductie', 'Instructie', 'Verwerking', 'Afronding']
 
 // ============================================================
@@ -179,16 +195,17 @@ export function levenshteinDistance(a: string, b: string): number {
 
 // ============================================================
 // ERROR DETECTION
+// Returns a score 0–4 indicating how many errors were corrected.
 // ============================================================
 export function detectErrorCorrections(
   finalLesplan: string,
   finalLes: string,
   finalOutlineOrder: string[]
 ): {
-  error1Fixed: boolean
-  error2Fixed: boolean
-  error3Fixed: boolean
-  error4Fixed: boolean
+  error1Fixed: boolean  // Aktief luisterren → Actief luisteren
+  error2Fixed: boolean  // Wrong phase order fixed
+  error3Fixed: boolean  // 10% → 55-93%
+  error4Fixed: boolean  // Grammar: voelt zich begrepen voelen
   totalFixed: number
 } {
   const error1Fixed =
@@ -213,13 +230,14 @@ export function detectErrorCorrections(
 
 // ============================================================
 // NUDGE CONTENT PER CONDITION
+// Add or modify nudge conditions here for your experiment.
 // ============================================================
 export type NudgeConfig = {
-  showAccuracyBadge: boolean
-  showWarningBanner: boolean
+  showAccuracyBadge: boolean        // Show "AI-gegenereerd" badge on content
+  showWarningBanner: boolean        // Show yellow warning banner about AI errors
   warningText: string
   accuracyBadgeText: string
-  showConfidenceIndicator: boolean
+  showConfidenceIndicator: boolean  // Show confidence % per section
   confidenceLevel: 'high' | 'medium' | 'low'
 }
 
@@ -260,46 +278,36 @@ export const NUDGE_CONFIGS: Record<ExperimentCondition, NudgeConfig> = {
 }
 
 // ============================================================
-// READING SCORE — converts SectionMetrics into a 0–100 score
+// READING SCORE UTILITIES (Empathy condition only)
+// Converts useReadingTracker SectionMetrics into a 0–100 score
+// per block, then into a tier label.
 //
-// Uses the same signals as useReadingTracker:
-//   • totalTimeMs   — time spent on section while visible
-//   • maxScrollDepth — how far the user scrolled through the section (0–1)
-//   • mouseMovements — mouse activity over the section
-//   • visits        — how many times the section came into view
-//
-// Score weights (total 100):
-//   40 pts — time on section  (saturates at TIME_SATURATE_MS)
-//   35 pts — scroll depth     (0 → 1 linearly)
-//   15 pts — mouse engagement (saturates at MOUSE_SATURATE)
-//   10 pts — revisits bonus   (1 revisit = full bonus)
+// Score weights (100 pts total):
+//   40 pts — time on section  (saturates at 20 s)
+//   35 pts — max scroll depth (0–1 linearly)
+//   15 pts — mouse movements  (saturates at 200)
+//   10 pts — revisit bonus    (≥2 visits = full bonus, 1 visit = 5 pts)
 // ============================================================
 
-const TIME_SATURATE_MS = 20_000   // 20 s of reading = full time score
-const MOUSE_SATURATE   = 200      // 200 mouse movements = full mouse score
+const TIME_SATURATE_MS = 20_000
+const MOUSE_SATURATE   = 200
 
 export type ReadingTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig'
 
 export interface SectionReading {
-  sectionId:    string
-  label:        string
-  score:        number       // 0–100
-  tier:         ReadingTier
-  timeMs:       number
-  scrollDepth:  number
-  mouseMovements: number
-  visits:       number
+  sectionId: string
+  label:     string
+  score:     number
+  tier:      ReadingTier
 }
 
 export interface ReadingAnalysis {
   sections:     SectionReading[]
   averageScore: number
   averageTier:  ReadingTier
-  weakestLabel: string   // label of lowest-scoring section
+  weakestLabel: string
 }
 
-// The four section IDs that are rendered as data-section-id attributes
-// in the Les tab. Must match what's rendered in page.tsx.
 export const LES_SECTION_IDS = [
   'les-introductie',
   'les-instructie',
@@ -314,20 +322,18 @@ export const LES_SECTION_LABELS: Record<string, string> = {
   'les-afronding':   'Afronding',
 }
 
-export function scoreFromMetrics(metrics: {
-  totalTimeMs:    number
+export function scoreFromMetrics(m: {
+  totalTimeMs: number
   maxScrollDepth: number
   mouseMovements: number
-  visits:         number
+  visits: number
 } | undefined): number {
-  if (!metrics) return 0
-
-  const timeScore   = Math.min(40, Math.round((metrics.totalTimeMs   / TIME_SATURATE_MS) * 40))
-  const scrollScore = Math.min(35, Math.round( metrics.maxScrollDepth * 35))
-  const mouseScore  = Math.min(15, Math.round((metrics.mouseMovements / MOUSE_SATURATE)  * 15))
-  const visitScore  = metrics.visits >= 2 ? 10 : metrics.visits === 1 ? 5 : 0
-
-  return Math.min(100, timeScore + scrollScore + mouseScore + visitScore)
+  if (!m) return 0
+  const time   = Math.min(40, Math.round((m.totalTimeMs    / TIME_SATURATE_MS) * 40))
+  const scroll = Math.min(35, Math.round( m.maxScrollDepth * 35))
+  const mouse  = Math.min(15, Math.round((m.mouseMovements / MOUSE_SATURATE)   * 15))
+  const visit  = m.visits >= 2 ? 10 : m.visits === 1 ? 5 : 0
+  return Math.min(100, time + scroll + mouse + visit)
 }
 
 export function tierFromScore(score: number): ReadingTier {
@@ -337,31 +343,14 @@ export function tierFromScore(score: number): ReadingTier {
 }
 
 export function buildReadingAnalysis(
-  sectionMetrics: Record<string, {
-    totalTimeMs: number
-    maxScrollDepth: number
-    mouseMovements: number
-    visits: number
-  }>
+  sectionMetrics: Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
 ): ReadingAnalysis {
   const sections: SectionReading[] = LES_SECTION_IDS.map((id) => {
-    const m = sectionMetrics[id]
-    const score = scoreFromMetrics(m)
-    return {
-      sectionId:      id,
-      label:          LES_SECTION_LABELS[id],
-      score,
-      tier:           tierFromScore(score),
-      timeMs:         m?.totalTimeMs    ?? 0,
-      scrollDepth:    m?.maxScrollDepth ?? 0,
-      mouseMovements: m?.mouseMovements ?? 0,
-      visits:         m?.visits         ?? 0,
-    }
+    const score = scoreFromMetrics(sectionMetrics[id])
+    return { sectionId: id, label: LES_SECTION_LABELS[id], score, tier: tierFromScore(score) }
   })
-
   const averageScore = Math.round(sections.reduce((s, r) => s + r.score, 0) / sections.length)
   const averageTier  = tierFromScore(averageScore)
   const weakest      = sections.reduce((min, r) => r.score < min.score ? r : min, sections[0])
-
   return { sections, averageScore, averageTier, weakestLabel: weakest.label }
 }
