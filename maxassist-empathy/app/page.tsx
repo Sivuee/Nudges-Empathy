@@ -12,6 +12,7 @@ import {
   EXPERIMENT_CONFIG,
   ExperimentCondition,
   NUDGE_CONFIGS,
+  NudgeConfig,
   levenshteinDistance,
   detectErrorCorrections,
   LES_SECTION_IDS,
@@ -210,7 +211,7 @@ function AutorsomgevingScreen({
   outlinePhases: OutlinePhase[]
   setOutlinePhases: (p: OutlinePhase[]) => void
   onShare: () => void
-  nudgeConfig: ReturnType<typeof NUDGE_CONFIGS[ExperimentCondition]>
+  nudgeConfig: NudgeConfig
   condition: ExperimentCondition
 }) {
   const tabs: { id: AuthoringTab; label: string; icon: React.ReactNode }[] = [
@@ -286,7 +287,7 @@ function AutorsomgevingScreen({
 function LesplanTab({ text, onChange, nudgeConfig }: {
   text: string
   onChange: (s: string) => void
-  nudgeConfig: ReturnType<typeof NUDGE_CONFIGS[ExperimentCondition]>
+  nudgeConfig: NudgeConfig
 }) {
   return (
     <div className="max-w-3xl mx-auto py-6 px-4">
@@ -316,7 +317,7 @@ function LesplanTab({ text, onChange, nudgeConfig }: {
 function LesoverzichtTab({ phases, onChange, nudgeConfig }: {
   phases: OutlinePhase[]
   onChange: (p: OutlinePhase[]) => void
-  nudgeConfig: ReturnType<typeof NUDGE_CONFIGS[ExperimentCondition]>
+  nudgeConfig: NudgeConfig
 }) {
   const movePhase = (index: number, direction: 'up' | 'down') => {
     const newPhases = [...phases]
@@ -582,7 +583,7 @@ function LesTabEmpathy({
 }: {
   text: string
   onChange: (s: string) => void
-  nudgeConfig: ReturnType<typeof NUDGE_CONFIGS[ExperimentCondition]>
+  nudgeConfig: NudgeConfig
 }) {
   const [trackerMounted, setTrackerMounted] = useState(false)
   const [analysis, setAnalysis] = useState<ReadingAnalysis | null>(null)
@@ -639,7 +640,7 @@ function LesTabEmpathy({
 function LesTab({ text, onChange, nudgeConfig, condition }: {
   text: string
   onChange: (s: string) => void
-  nudgeConfig: ReturnType<typeof NUDGE_CONFIGS[ExperimentCondition]>
+  nudgeConfig: NudgeConfig
   condition: ExperimentCondition
 }) {
   if (condition === 'empathy') {
