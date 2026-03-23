@@ -239,21 +239,7 @@ function ChatPanel({ lesdoel, message }: { lesdoel: string; message?: string }) 
 // Replaces ChatPanel in LesTab when condition === 'empathy'.
 // Identical outer structure to ChatPanel, with Simon panel added below Max's message.
 
-type ReadingTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig'
-
-interface SectionReading {
-  sectionId: string
-  label: string
-  score: number
-  tier: ReadingTier
-}
-
-interface ReadingAnalysis {
-  sections: SectionReading[]
-  averageScore: number
-  averageTier: ReadingTier
-  weakestLabel: string
-}
+// SectionReading, ReadingAnalysis, and ScoreTier are defined in the Simon block below
 
 const PHASE_SECTION_IDS = [
   'phase-introductie',
@@ -269,16 +255,28 @@ const PHASE_SECTION_LABELS: Record<string, string> = {
   'phase-afronding':   'Afronding',
 }
 
-const TIER_STYLE: Record<ReadingTier, { dot: string; text: string; bg: string; border: string }> = {
-  Verwarrend: { dot: 'bg-red-500',     text: 'text-red-600',     bg: 'bg-red-50',     border: 'border-red-200'    },
-  Duidelijk:  { dot: 'bg-amber-400',   text: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-200'  },
-  Geweldig:   { dot: 'bg-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
+// Phase key → OutlinePhase name (used to split EXPERIMENT_TEXT)
+const PHASE_ID_TO_OUTLINE: Record<string, string> = {
+  'phase-introductie': 'introductie',
+  'phase-instructie':  'instructie',
+  'phase-verwerking':  'verwerking',
+  'phase-afronding':   'afronding',
 }
 
+const TIER_STYLE: Record<string, { text: string }> = {
+  Verwarrend:  { text: 'text-red-600'     },
+  Duidelijk:   { text: 'text-amber-600'   },
+  Geweldig:    { text: 'text-emerald-500' },
+  Uitstekend:  { text: 'text-emerald-700' },
+}
+
+// ─── Tier type — four levels ──────────────────────────────────────────────────
+// Uitstekend is only reached when ALL blocks are Geweldig on BOTH read AND edit.
+type ScoreTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig' | 'Uitstekend'
+
 // ─── Per-phase minimum reading times ─────────────────────────────────────────
-// Edit these values to control how long a teacher must spend on each block
-// before Simon considers it properly read.
-// TIME_GEWELDIG_MS_PER_PHASE is the time at which the block reaches full score.
+// minMs  = hard gate: below this the block stays Verwarrend regardless.
+// geweldigMs = time at which the block reaches full (80 pt) time score.
 const PHASE_READ_CONFIG: Record<string, { minMs: number; geweldigMs: number }> = {
   'phase-introductie': { minMs:  8_000, geweldigMs: 30_000 },
   'phase-instructie':  { minMs: 10_000, geweldigMs: 40_000 },
@@ -287,61 +285,55 @@ const PHASE_READ_CONFIG: Record<string, { minMs: number; geweldigMs: number }> =
 }
 const MOUSE_SATURATE = 150
 
-function scoreFromMetrics(
+function readScoreFromMetrics(
   m: { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number } | undefined,
   sectionId: string
 ): number {
   if (!m) return 0
   const cfg = PHASE_READ_CONFIG[sectionId] ?? { minMs: 8_000, geweldigMs: 30_000 }
-  // Hard gate: insufficient reading time for this block
   if (m.totalTimeMs < cfg.minMs) return 0
-  // Time: 0–80 pts (main factor), saturates at geweldigMs
   const timeScore   = Math.min(80, Math.round((m.totalTimeMs / cfg.geweldigMs) * 80))
-  // Secondary signals: scroll depth up to 12 pts, mouse up to 8 pts
   const scrollScore = Math.min(12, Math.round(m.maxScrollDepth * 12))
   const mouseScore  = Math.min(8,  Math.round((m.mouseMovements / MOUSE_SATURATE) * 8))
   return Math.min(100, timeScore + scrollScore + mouseScore)
 }
 
-function tierFromScore(score: number): ReadingTier {
-  if (score >= 65) return 'Geweldig'
-  if (score >= 30) return 'Duidelijk'
-  return 'Verwarrend'
-}
-
-function buildReadingAnalysis(
-  sectionMetrics: Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
-): ReadingAnalysis {
-  const sections: SectionReading[] = PHASE_SECTION_IDS.map((id) => {
-    const score = scoreFromMetrics(sectionMetrics[id], id)
-    return { sectionId: id, label: PHASE_SECTION_LABELS[id], score, tier: tierFromScore(score) }
-  })
-  const averageScore = Math.round(sections.reduce((s, r) => s + r.score, 0) / sections.length)
-  const averageTier  = tierFromScore(averageScore)
-  const weakest      = sections.reduce((min, r) => r.score < min.score ? r : min, sections[0])
-  return { sections, averageScore, averageTier, weakestLabel: weakest.label }
-}
-
-// ─── Edit score ───────────────────────────────────────────────────────────────
-// Measures how much the teacher has personalised the AI-generated text.
-// Uses character-level Levenshtein distance between the current text and the
-// original EXPERIMENT_TEXT. Normalised to [0, 1] where:
-//   0.00 = unchanged (pure AI)   → AIGegenereerd
-//   0.05 = small tweaks          → DeelsBewerkt
-//   0.15 = substantial edits     → Menselijk
+// ─── Per-phase edit score ─────────────────────────────────────────────────────
+// Same tier structure as reading score, but based on Levenshtein distance
+// between the current phase text and the original EXPERIMENT_TEXT phase.
 //
-// Thresholds (fraction of total characters changed):
-const EDIT_DEELS_THRESHOLD    = 0.04   // ≥ 4 % changed → DeelsBewerkt
-const EDIT_MENSELIJK_THRESHOLD = 0.14  // ≥ 14 % changed → Menselijk
+// Thresholds (fraction of original phase character count changed):
+//   < EDIT_MIN_RATIO  → score 0  (Verwarrend — not meaningfully edited)
+//   ≥ EDIT_MIN_RATIO  → score scales linearly up to EDIT_GEWELDIG_RATIO
+const EDIT_MIN_RATIO      = 0.03   // < 3 % changed → score 0
+const EDIT_GEWELDIG_RATIO = 0.18   // ≥ 18 % changed → full score (80 pts)
 
-type EditTier = 'AIGegenereerd' | 'DeelsBewerkt' | 'Menselijk'
+// Split EXPERIMENT_TEXT into per-phase buckets once at module load.
+// Keys match OutlinePhase names: 'introductie' | 'instructie' | 'verwerking' | 'afronding'
+const ORIGINAL_PHASE_TEXT: Record<string, string> = (() => {
+  const buckets: Record<string, string[]> = {
+    introductie: [], instructie: [], verwerking: [], afronding: [],
+  }
+  let current: string | null = null
+  for (const line of EXPERIMENT_TEXT.split('\n')) {
+    const m = line.match(/^##\s+(.+)$/)
+    if (m) {
+      const key = m[1].trim().toLowerCase()
+      if (key in buckets) { current = key; continue }
+    }
+    if (current) buckets[current].push(line)
+  }
+  const result: Record<string, string> = {}
+  for (const [k, lines] of Object.entries(buckets)) {
+    result[k] = lines.join('\n').trim()
+  }
+  return result
+})()
 
-// Lightweight Levenshtein on plain strings (same algorithm as metrics.ts)
 function simpleLevenshtein(a: string, b: string): number {
   const m = a.length, n = b.length
   if (m === 0) return n
   if (n === 0) return m
-  // Keep only two rows to save memory
   let prev = Array.from({ length: n + 1 }, (_, j) => j)
   let curr = new Array(n + 1).fill(0)
   for (let i = 1; i <= m; i++) {
@@ -356,73 +348,133 @@ function simpleLevenshtein(a: string, b: string): number {
   return prev[n]
 }
 
-function editTierFromText(currentText: string, originalText: string): EditTier {
-  if (!originalText) return 'AIGegenereerd'
-  const dist = simpleLevenshtein(
-    currentText.replace(/\s+/g, ' ').trim(),
-    originalText.replace(/\s+/g, ' ').trim()
+function editScoreForPhase(currentPhaseText: string, phaseKey: string): number {
+  const original = ORIGINAL_PHASE_TEXT[PHASE_ID_TO_OUTLINE[phaseKey] ?? ''] ?? ''
+  if (!original) return 0
+  const dist  = simpleLevenshtein(
+    currentPhaseText.replace(/\s+/g, ' ').trim(),
+    original.replace(/\s+/g, ' ').trim()
   )
-  const ratio = dist / Math.max(1, originalText.length)
-  if (ratio >= EDIT_MENSELIJK_THRESHOLD) return 'Menselijk'
-  if (ratio >= EDIT_DEELS_THRESHOLD)    return 'DeelsBewerkt'
-  return 'AIGegenereerd'
+  const ratio = dist / Math.max(1, original.length)
+  if (ratio < EDIT_MIN_RATIO) return 0
+  const editScore = Math.min(80, Math.round((ratio / EDIT_GEWELDIG_RATIO) * 80))
+  return Math.min(100, editScore)
 }
 
-// ─── Combined verdict ─────────────────────────────────────────────────────────
-// Maps (ReadingTier × EditTier) → a Dutch verdict string + colour class.
-//
-// Matrix:
-//                  AIGegenereerd   DeelsBewerkt    Menselijk
-// Geweldig         Geweldig        Geweldig        Geweldig
-// Duidelijk        Duidelijk maar  Duidelijk       Duidelijk
-//                  AI gegenereerd
-// Verwarrend       Verwarrend maar Verwarrend maar Verwarrend maar
-//                  AI gegenereerd  gedeeltelijk    menselijk
-//                                  bewerkt
-//
-// Note: when reading is Geweldig, edit tier does NOT change the verdict —
-// a well-read lesson is good regardless of how much was edited.
-// When reading is poor, we distinguish WHY it might be confusing.
-
-interface Verdict {
-  label: string       // shown in bold coloured text
-  sub: string | null  // optional qualifier shown after the label
-  colorClass: string  // Tailwind text colour
+function tierFromScore(score: number): Exclude<ScoreTier, 'Uitstekend'> {
+  if (score >= 65) return 'Geweldig'
+  if (score >= 30) return 'Duidelijk'
+  return 'Verwarrend'
 }
 
-function buildVerdict(readTier: ReadingTier, editTier: EditTier): Verdict {
-  if (readTier === 'Geweldig') {
-    return { label: 'Geweldig', sub: null, colorClass: 'text-emerald-600' }
-  }
-  if (readTier === 'Duidelijk') {
-    if (editTier === 'AIGegenereerd') {
-      return { label: 'Duidelijk', sub: 'maar AI gegenereerd', colorClass: 'text-amber-600' }
+// ─── Analysis types ───────────────────────────────────────────────────────────
+interface SectionReading {
+  sectionId:  string
+  label:      string
+  readScore:  number
+  readTier:   Exclude<ScoreTier, 'Uitstekend'>
+  editScore:  number
+  editTier:   Exclude<ScoreTier, 'Uitstekend'>
+}
+
+interface ReadingAnalysis {
+  sections:     SectionReading[]
+  averageScore: number
+  // Overall tier — Uitstekend only when every block is Geweldig on both axes
+  overallTier:  ScoreTier
+  // Two lowest-scoring blocks by read score (distinct labels, used for hint)
+  weakestReadLabels: string[]
+  // Two lowest-scoring blocks by edit score (distinct labels, used for personalise hint)
+  weakestEditLabels: string[]
+}
+
+function buildReadingAnalysis(
+  sectionMetrics: Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>,
+  phaseBlocks: Record<string, string[]>
+): ReadingAnalysis {
+  const sections: SectionReading[] = PHASE_SECTION_IDS.map((id) => {
+    const readScore = readScoreFromMetrics(sectionMetrics[id], id)
+    const readTier  = tierFromScore(readScore)
+    // phaseBlocks key is the OutlinePhase name (without 'phase-' prefix)
+    const outlineKey = PHASE_ID_TO_OUTLINE[id] ?? ''
+    const currentText = (phaseBlocks[outlineKey] ?? []).join('\n')
+    const editScore = editScoreForPhase(currentText, id)
+    const editTier  = tierFromScore(editScore)
+    return { sectionId: id, label: PHASE_SECTION_LABELS[id], readScore, readTier, editScore, editTier }
+  })
+
+  const averageScore = Math.round(
+    sections.reduce((s, r) => s + r.readScore, 0) / sections.length
+  )
+
+  // Uitstekend only when every block is Geweldig on both axes
+  const allGeweldig = sections.every(s => s.readTier === 'Geweldig' && s.editTier === 'Geweldig')
+  const overallTier: ScoreTier = allGeweldig
+    ? 'Uitstekend'
+    : tierFromScore(averageScore)
+
+  // Two weakest read blocks — sort ascending by readScore, take top 2 distinct labels
+  const byReadScore = [...sections].sort((a, b) => a.readScore - b.readScore)
+  const weakestReadLabels = byReadScore.slice(0, 2).map(s => s.label)
+
+  // Two weakest edit blocks — sort ascending by editScore, take top 2 distinct labels
+  const byEditScore = [...sections].sort((a, b) => a.editScore - b.editScore)
+  const weakestEditLabels = byEditScore.slice(0, 2).map(s => s.label)
+
+  return { sections, averageScore, overallTier, weakestReadLabels, weakestEditLabels }
+}
+
+// ─── Hint logic ───────────────────────────────────────────────────────────────
+// Returns the hint string to show below the verdict, or null if no hint needed.
+function buildHint(analysis: ReadingAnalysis): string | null {
+  const { overallTier, sections, weakestReadLabels, weakestEditLabels } = analysis
+
+  if (overallTier === 'Uitstekend') return null
+
+  const avgReadTier = tierFromScore(analysis.averageScore)
+
+  // Reading is Geweldig but edit is not → personalise hint
+  if (avgReadTier === 'Geweldig' && overallTier !== 'Uitstekend') {
+    const [first, second] = weakestEditLabels
+    if (first && second && first !== second) {
+      return `Om de les verder te verbeteren, maak het persoonlijker in de ${first} of ${second}.`
     }
-    return { label: 'Duidelijk', sub: null, colorClass: 'text-amber-600' }
+    if (first) {
+      return `Om de les verder te verbeteren, maak het persoonlijker in de ${first}.`
+    }
+    return null
   }
-  // Verwarrend
-  if (editTier === 'Menselijk') {
-    return { label: 'Verwarrend', sub: 'maar menselijk', colorClass: 'text-red-600' }
+
+  // Reading is not yet Geweldig → read hint with two distinct block names
+  const [first, second] = weakestReadLabels
+  if (first && second && first !== second) {
+    return `Voor meer duidelijkheid, verifieer de ${first} en de ${second}.`
   }
-  if (editTier === 'DeelsBewerkt') {
-    return { label: 'Verwarrend', sub: 'maar gedeeltelijk bewerkt', colorClass: 'text-red-600' }
+  if (first) {
+    return `Voor meer duidelijkheid, verifieer de ${first}.`
   }
-  return { label: 'Verwarrend', sub: 'maar AI gegenereerd', colorClass: 'text-red-600' }
+  return null
 }
 
 // Mounts the IntersectionObserver tracker + polls every 500ms.
 // Must only mount after the phase cards are in the DOM.
-function SimonTracker({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void }) {
+function SimonTracker({ onAnalysis, phaseBlocks }: {
+  onAnalysis: (a: ReadingAnalysis) => void
+  phaseBlocks: Record<string, string[]>
+}) {
   const { getSnapshot } = useReadingTracker([...PHASE_SECTION_IDS])
-  const callbackRef = useRef(onAnalysis)
-  callbackRef.current = onAnalysis
+  const callbackRef     = useRef(onAnalysis)
+  callbackRef.current   = onAnalysis
+  const blocksRef       = useRef(phaseBlocks)
+  blocksRef.current     = phaseBlocks
 
   useEffect(() => {
     const id = setInterval(() => {
       const snap = getSnapshot()
       callbackRef.current(
         buildReadingAnalysis(
-          snap.sections as Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
+          snap.sections as Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>,
+          blocksRef.current
         )
       )
     }, 500)
@@ -433,36 +485,38 @@ function SimonTracker({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void
 }
 
 // SimonPanel — image left, text right (matching prototype screenshot).
-// No per-block tier rows. Sits inside the Max chat card, below the message bubble.
-// To replace the emoji avatar with a custom image, swap the emoji div for:
-//   <img src="/simon.png" alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
-// Place your image in the /public folder of the project.
-function SimonPanel({ analysis, lesText }: { analysis: ReadingAnalysis | null; lesText: string }) {
-  const hasData = analysis !== null && analysis.sections.some(s => s.score > 0)
-  const readTier = analysis?.averageTier ?? 'Verwarrend'
-  const editTier = editTierFromText(lesText, EXPERIMENT_TEXT)
-  const verdict  = buildVerdict(readTier, editTier)
-  // Avatar emoji — swap for <img> when you have custom art
-  const avatar   = !hasData ? '🧑‍🎓' : readTier === 'Verwarrend' ? '😕' : readTier === 'Duidelijk' ? '🙂' : '😄'
+// Sits inside the Max chat card, below the message bubble.
+// To replace the emoji avatar with a custom image:
+//   <img src="/simon-happy.png" alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
+// Place the image in /public. Use different images per state:
+//   src={overallTier === 'Uitstekend' || overallTier === 'Geweldig' ? '/simon-happy.png' : overallTier === 'Duidelijk' ? '/simon-neutral.png' : '/simon-sad.png'}
+function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
+  const hasData    = analysis !== null && analysis.sections.some(s => s.readScore > 0)
+  const tier       = analysis?.overallTier ?? 'Verwarrend'
+  const hint       = analysis ? buildHint(analysis) : null
+  const colorClass = TIER_STYLE[tier]?.text ?? 'text-gray-800'
+  const avatar     = !hasData ? '🧑\u200d🎓'
+    : tier === 'Uitstekend'         ? '🤩'
+    : tier === 'Geweldig'           ? '😄'
+    : tier === 'Duidelijk'          ? '🙂'
+    : /* Verwarrend */                '😕'
 
   return (
     <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
-      {/* Header */}
       <div className="px-4 py-2.5 border-b border-blue-100">
         <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
-      {/* Body: image left, text right — always this layout */}
       <div className="px-4 py-3 flex items-start gap-3">
         {/* ── Avatar ──────────────────────────────────────────────────────────
             CUSTOM IMAGE: replace this div with an <img> tag, e.g.:
               <img
-                src="/simon-neutral.png"   ← or simon-sad.png / simon-happy.png
+                src={overallTier === 'Uitstekend' || overallTier === 'Geweldig'
+                  ? '/simon-happy.png'
+                  : overallTier === 'Duidelijk' ? '/simon-neutral.png' : '/simon-sad.png'}
                 alt="Simon"
                 className="w-14 h-14 flex-shrink-0 rounded-lg object-cover"
               />
-            Place the image file(s) in the /public folder of the project.
-            You can use different images per state by checking readTier:
-              src={readTier === 'Geweldig' ? '/simon-happy.png' : readTier === 'Duidelijk' ? '/simon-neutral.png' : '/simon-sad.png'}
+            Place your image files in the /public folder of the project.
         ─────────────────────────────────────────────────────────────────── */}
         <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
           {avatar}
@@ -476,16 +530,11 @@ function SimonPanel({ analysis, lesText }: { analysis: ReadingAnalysis | null; l
             <>
               <p className="text-sm text-gray-600 leading-relaxed">
                 Simon heeft de tekst gelezen en vindt de tekst{' '}
-                <span className={`font-bold ${verdict.colorClass}`}>
-                  {verdict.label}
-                  {verdict.sub && <span className="font-normal"> {verdict.sub}</span>}
-                </span>.
+                <span className={`font-bold ${colorClass}`}>{tier}.</span>
               </p>
-              {readTier !== 'Geweldig' && (
+              {hint && (
                 <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
-                  Voor meer duidelijkheid, verifieer de{' '}
-                  <span className="font-bold text-gray-800">{analysis!.weakestLabel}</span>{' '}
-                  en de <span className="font-bold text-gray-800">Instructie</span>.
+                  {hint}
                 </p>
               )}
             </>
@@ -498,17 +547,15 @@ function SimonPanel({ analysis, lesText }: { analysis: ReadingAnalysis | null; l
 
 // Empathy variant of ChatPanel for LesTab.
 // Simon lives inside the Max card, directly below the message bubble.
-function EmpathyChatPanel({ lesdoel, analysis, lesText }: { lesdoel: string; analysis: ReadingAnalysis | null; lesText: string }) {
+function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: ReadingAnalysis | null }) {
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-2/5 p-6 bg-white overflow-y-auto gap-4">
       <LesdoelCard lesdoel={lesdoel} />
       <div className="border border-gray-200 rounded-lg bg-white flex flex-col overflow-hidden">
-        {/* Max header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
           <div className="w-8 h-8 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
           <span className="text-sm font-medium">Max</span>
         </div>
-        {/* Max message bubble */}
         <div className="p-4">
           <div className="flex gap-2 items-end">
             <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
@@ -517,8 +564,7 @@ function EmpathyChatPanel({ lesdoel, analysis, lesText }: { lesdoel: string; ana
             </div>
           </div>
         </div>
-        {/* Simon nudge — in the same card, below the message */}
-        <SimonPanel analysis={analysis} lesText={lesText} />
+        <SimonPanel analysis={analysis} />
       </div>
     </div>
   )
@@ -1430,7 +1476,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
       {/* SimonTracker: only mounted in empathy condition, after phase cards are in DOM */}
       {condition === 'empathy' && trackerMounted && (
-        <SimonTracker onAnalysis={onReadingAnalysis} />
+        <SimonTracker onAnalysis={onReadingAnalysis} phaseBlocks={phaseBlocks} />
       )}
 
       <div className="w-full lg:w-3/5 border-r bg-white overflow-y-auto p-6 md:p-10 pb-32">
@@ -1456,7 +1502,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
       {/* Right panel: empathy gets Simon, everyone else gets original ChatPanel */}
       {condition === 'empathy'
-        ? <EmpathyChatPanel lesdoel={lesdoel} analysis={readingAnalysis} lesText={lesText} />
+        ? <EmpathyChatPanel lesdoel={lesdoel} analysis={readingAnalysis} />
         : <ChatPanel lesdoel={lesdoel} message="De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!" />
       }
     </div>
