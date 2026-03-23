@@ -275,19 +275,28 @@ const TIER_STYLE: Record<ReadingTier, { dot: string; text: string; bg: string; b
   Geweldig:   { dot: 'bg-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' },
 }
 
-// Reading time is the primary gate. A block must be viewed for at least
-// TIME_VERWARREND_MS before it can score above Verwarrend.
-// Time contributes 80 pts; scroll depth and mouse activity add up to 20 pts.
-const TIME_VERWARREND_MS = 8_000    // < 8 s → score 0 (Verwarrend)
-const TIME_GEWELDIG_MS   = 30_000   // ≥ 30 s → 80 pts on time alone
-const MOUSE_SATURATE     = 150
+// ─── Per-phase minimum reading times ─────────────────────────────────────────
+// Edit these values to control how long a teacher must spend on each block
+// before Simon considers it properly read.
+// TIME_GEWELDIG_MS_PER_PHASE is the time at which the block reaches full score.
+const PHASE_READ_CONFIG: Record<string, { minMs: number; geweldigMs: number }> = {
+  'phase-introductie': { minMs:  8_000, geweldigMs: 30_000 },
+  'phase-instructie':  { minMs: 10_000, geweldigMs: 40_000 },
+  'phase-verwerking':  { minMs:  8_000, geweldigMs: 30_000 },
+  'phase-afronding':   { minMs:  6_000, geweldigMs: 25_000 },
+}
+const MOUSE_SATURATE = 150
 
-function scoreFromMetrics(m: { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number } | undefined): number {
+function scoreFromMetrics(
+  m: { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number } | undefined,
+  sectionId: string
+): number {
   if (!m) return 0
-  // Hard gate: insufficient reading time
-  if (m.totalTimeMs < TIME_VERWARREND_MS) return 0
-  // Time: 0–80 pts (main factor)
-  const timeScore   = Math.min(80, Math.round((m.totalTimeMs / TIME_GEWELDIG_MS) * 80))
+  const cfg = PHASE_READ_CONFIG[sectionId] ?? { minMs: 8_000, geweldigMs: 30_000 }
+  // Hard gate: insufficient reading time for this block
+  if (m.totalTimeMs < cfg.minMs) return 0
+  // Time: 0–80 pts (main factor), saturates at geweldigMs
+  const timeScore   = Math.min(80, Math.round((m.totalTimeMs / cfg.geweldigMs) * 80))
   // Secondary signals: scroll depth up to 12 pts, mouse up to 8 pts
   const scrollScore = Math.min(12, Math.round(m.maxScrollDepth * 12))
   const mouseScore  = Math.min(8,  Math.round((m.mouseMovements / MOUSE_SATURATE) * 8))
@@ -304,13 +313,101 @@ function buildReadingAnalysis(
   sectionMetrics: Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>
 ): ReadingAnalysis {
   const sections: SectionReading[] = PHASE_SECTION_IDS.map((id) => {
-    const score = scoreFromMetrics(sectionMetrics[id])
+    const score = scoreFromMetrics(sectionMetrics[id], id)
     return { sectionId: id, label: PHASE_SECTION_LABELS[id], score, tier: tierFromScore(score) }
   })
   const averageScore = Math.round(sections.reduce((s, r) => s + r.score, 0) / sections.length)
   const averageTier  = tierFromScore(averageScore)
   const weakest      = sections.reduce((min, r) => r.score < min.score ? r : min, sections[0])
   return { sections, averageScore, averageTier, weakestLabel: weakest.label }
+}
+
+// ─── Edit score ───────────────────────────────────────────────────────────────
+// Measures how much the teacher has personalised the AI-generated text.
+// Uses character-level Levenshtein distance between the current text and the
+// original EXPERIMENT_TEXT. Normalised to [0, 1] where:
+//   0.00 = unchanged (pure AI)   → AIGegenereerd
+//   0.05 = small tweaks          → DeelsBewerkt
+//   0.15 = substantial edits     → Menselijk
+//
+// Thresholds (fraction of total characters changed):
+const EDIT_DEELS_THRESHOLD    = 0.04   // ≥ 4 % changed → DeelsBewerkt
+const EDIT_MENSELIJK_THRESHOLD = 0.14  // ≥ 14 % changed → Menselijk
+
+type EditTier = 'AIGegenereerd' | 'DeelsBewerkt' | 'Menselijk'
+
+// Lightweight Levenshtein on plain strings (same algorithm as metrics.ts)
+function simpleLevenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+  // Keep only two rows to save memory
+  let prev = Array.from({ length: n + 1 }, (_, j) => j)
+  let curr = new Array(n + 1).fill(0)
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i - 1] === b[j - 1]
+        ? prev[j - 1]
+        : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1])
+    }
+    ;[prev, curr] = [curr, prev]
+  }
+  return prev[n]
+}
+
+function editTierFromText(currentText: string, originalText: string): EditTier {
+  if (!originalText) return 'AIGegenereerd'
+  const dist = simpleLevenshtein(
+    currentText.replace(/\s+/g, ' ').trim(),
+    originalText.replace(/\s+/g, ' ').trim()
+  )
+  const ratio = dist / Math.max(1, originalText.length)
+  if (ratio >= EDIT_MENSELIJK_THRESHOLD) return 'Menselijk'
+  if (ratio >= EDIT_DEELS_THRESHOLD)    return 'DeelsBewerkt'
+  return 'AIGegenereerd'
+}
+
+// ─── Combined verdict ─────────────────────────────────────────────────────────
+// Maps (ReadingTier × EditTier) → a Dutch verdict string + colour class.
+//
+// Matrix:
+//                  AIGegenereerd   DeelsBewerkt    Menselijk
+// Geweldig         Geweldig        Geweldig        Geweldig
+// Duidelijk        Duidelijk maar  Duidelijk       Duidelijk
+//                  AI gegenereerd
+// Verwarrend       Verwarrend maar Verwarrend maar Verwarrend maar
+//                  AI gegenereerd  gedeeltelijk    menselijk
+//                                  bewerkt
+//
+// Note: when reading is Geweldig, edit tier does NOT change the verdict —
+// a well-read lesson is good regardless of how much was edited.
+// When reading is poor, we distinguish WHY it might be confusing.
+
+interface Verdict {
+  label: string       // shown in bold coloured text
+  sub: string | null  // optional qualifier shown after the label
+  colorClass: string  // Tailwind text colour
+}
+
+function buildVerdict(readTier: ReadingTier, editTier: EditTier): Verdict {
+  if (readTier === 'Geweldig') {
+    return { label: 'Geweldig', sub: null, colorClass: 'text-emerald-600' }
+  }
+  if (readTier === 'Duidelijk') {
+    if (editTier === 'AIGegenereerd') {
+      return { label: 'Duidelijk', sub: 'maar AI gegenereerd', colorClass: 'text-amber-600' }
+    }
+    return { label: 'Duidelijk', sub: null, colorClass: 'text-amber-600' }
+  }
+  // Verwarrend
+  if (editTier === 'Menselijk') {
+    return { label: 'Verwarrend', sub: 'maar menselijk', colorClass: 'text-red-600' }
+  }
+  if (editTier === 'DeelsBewerkt') {
+    return { label: 'Verwarrend', sub: 'maar gedeeltelijk bewerkt', colorClass: 'text-red-600' }
+  }
+  return { label: 'Verwarrend', sub: 'maar AI gegenereerd', colorClass: 'text-red-600' }
 }
 
 // Mounts the IntersectionObserver tracker + polls every 500ms.
@@ -337,11 +434,16 @@ function SimonTracker({ onAnalysis }: { onAnalysis: (a: ReadingAnalysis) => void
 
 // SimonPanel — image left, text right (matching prototype screenshot).
 // No per-block tier rows. Sits inside the Max chat card, below the message bubble.
-function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
+// To replace the emoji avatar with a custom image, swap the emoji div for:
+//   <img src="/simon.png" alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
+// Place your image in the /public folder of the project.
+function SimonPanel({ analysis, lesText }: { analysis: ReadingAnalysis | null; lesText: string }) {
   const hasData = analysis !== null && analysis.sections.some(s => s.score > 0)
-  const tier    = analysis?.averageTier ?? 'Verwarrend'
-  // Avatar emoji changes with tier once data arrives; placeholder until then
-  const avatar  = !hasData ? '🧑‍🎓' : tier === 'Verwarrend' ? '😕' : tier === 'Duidelijk' ? '🙂' : '😄'
+  const readTier = analysis?.averageTier ?? 'Verwarrend'
+  const editTier = editTierFromText(lesText, EXPERIMENT_TEXT)
+  const verdict  = buildVerdict(readTier, editTier)
+  // Avatar emoji — swap for <img> when you have custom art
+  const avatar   = !hasData ? '🧑‍🎓' : readTier === 'Verwarrend' ? '😕' : readTier === 'Duidelijk' ? '🙂' : '😄'
 
   return (
     <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
@@ -351,23 +453,36 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
       </div>
       {/* Body: image left, text right — always this layout */}
       <div className="px-4 py-3 flex items-start gap-3">
-        {/* Avatar placeholder — replace src with your custom image */}
+        {/* ── Avatar ──────────────────────────────────────────────────────────
+            CUSTOM IMAGE: replace this div with an <img> tag, e.g.:
+              <img
+                src="/simon-neutral.png"   ← or simon-sad.png / simon-happy.png
+                alt="Simon"
+                className="w-14 h-14 flex-shrink-0 rounded-lg object-cover"
+              />
+            Place the image file(s) in the /public folder of the project.
+            You can use different images per state by checking readTier:
+              src={readTier === 'Geweldig' ? '/simon-happy.png' : readTier === 'Duidelijk' ? '/simon-neutral.png' : '/simon-sad.png'}
+        ─────────────────────────────────────────────────────────────────── */}
         <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
           {avatar}
         </div>
         <div className="flex-1 min-w-0">
           {!hasData ? (
-            <p className="text-xs text-gray-600 leading-relaxed">
+            <p className="text-sm text-gray-600 leading-relaxed">
               De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
             </p>
           ) : (
             <>
-              <p className="text-xs text-gray-600 leading-relaxed">
+              <p className="text-sm text-gray-600 leading-relaxed">
                 Simon heeft de tekst gelezen en vindt de tekst{' '}
-                <span className={`font-bold ${TIER_STYLE[tier].text}`}>{tier}.</span>
+                <span className={`font-bold ${verdict.colorClass}`}>
+                  {verdict.label}
+                  {verdict.sub && <span className="font-normal"> {verdict.sub}</span>}
+                </span>.
               </p>
-              {tier !== 'Geweldig' && (
-                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+              {readTier !== 'Geweldig' && (
+                <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
                   Voor meer duidelijkheid, verifieer de{' '}
                   <span className="font-bold text-gray-800">{analysis!.weakestLabel}</span>{' '}
                   en de <span className="font-bold text-gray-800">Instructie</span>.
@@ -383,7 +498,7 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
 
 // Empathy variant of ChatPanel for LesTab.
 // Simon lives inside the Max card, directly below the message bubble.
-function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: ReadingAnalysis | null }) {
+function EmpathyChatPanel({ lesdoel, analysis, lesText }: { lesdoel: string; analysis: ReadingAnalysis | null; lesText: string }) {
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-2/5 p-6 bg-white overflow-y-auto gap-4">
       <LesdoelCard lesdoel={lesdoel} />
@@ -403,7 +518,7 @@ function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: Re
           </div>
         </div>
         {/* Simon nudge — in the same card, below the message */}
-        <SimonPanel analysis={analysis} />
+        <SimonPanel analysis={analysis} lesText={lesText} />
       </div>
     </div>
   )
@@ -1341,7 +1456,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
       {/* Right panel: empathy gets Simon, everyone else gets original ChatPanel */}
       {condition === 'empathy'
-        ? <EmpathyChatPanel lesdoel={lesdoel} analysis={readingAnalysis} />
+        ? <EmpathyChatPanel lesdoel={lesdoel} analysis={readingAnalysis} lesText={lesText} />
         : <ChatPanel lesdoel={lesdoel} message="De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!" />
       }
     </div>
