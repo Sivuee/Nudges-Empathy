@@ -499,30 +499,55 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
 
   const { overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels } = analysis
 
-  // When reading = Geweldig but not yet edited → show amber "Geweldig" + Duidelijk avatar
-  const aiQualifier = overallReadTier === 'Geweldig' && overallEditTier === 'AIGegenereerd'
+  // ── Qualifier text and connector word per (readTier × editTier) ─────────────
+  // Verwarrend + AI  → "en AI gegenereerd"
+  // Verwarrend + Mens → "maar Menselijk"
+  // Duidelijk  + AI  → "maar AI gegenereerd"
+  // Duidelijk  + Mens → "en Menselijk"
+  // Geweldig   + AI  → "en AI gegenereerd"  (label stays amber, avatar stays neutral)
+  // Geweldig   + Mens → no qualifier
+  type Qualifier = { connector: string; text: string } | null
+  const qualifier: Qualifier = (() => {
+    if (overallReadTier === 'Verwarrend') {
+      return overallEditTier === 'AIGegenereerd'
+        ? { connector: 'en', text: 'AI gegenereerd' }
+        : { connector: 'maar', text: 'Menselijk' }
+    }
+    if (overallReadTier === 'Duidelijk') {
+      return overallEditTier === 'AIGegenereerd'
+        ? { connector: 'maar', text: 'AI gegenereerd' }
+        : { connector: 'en', text: 'Menselijk' }
+    }
+    // Geweldig
+    return overallEditTier === 'AIGegenereerd'
+      ? { connector: 'maar', text: 'AI gegenereerd' }
+      : null
+  })()
 
-  // Colour: amber when aiQualifier, otherwise reading tier colour
-  const labelColour = aiQualifier ? 'text-amber-500' : READ_TIER_COLOUR[overallReadTier]
+  // Colour: Geweldig+AI stays amber; all other combos use the reading tier colour
+  const labelColour = (overallReadTier === 'Geweldig' && overallEditTier === 'AIGegenereerd')
+    ? 'text-amber-500'
+    : READ_TIER_COLOUR[overallReadTier]
 
-  // Avatar: sad=Verwarrend, neutral=Duidelijk or (Geweldig+AI), happy=Geweldig+Menselijk
+  // Avatar: driven by reading tier only.
+  // Geweldig+AI stays neutral (🙂) to reflect the caveat.
   const avatar = overallReadTier === 'Verwarrend' ? '😕'
     : overallReadTier === 'Duidelijk'             ? '🙂'
-    : aiQualifier                                 ? '🙂'   // Geweldig but still AI → neutral
+    : overallEditTier === 'AIGegenereerd'          ? '🙂'  // Geweldig but still AI → neutral
     : /* Geweldig + Menselijk */                    '😄'
 
-  // Hint — returns JSX so block names can be bold
+  // ── Hint ────────────────────────────────────────────────────────────────────
   let hint: React.ReactNode = null
   if (overallReadTier !== 'Geweldig') {
-    // Reading hint — bold the block names
+    // Reading not yet Geweldig → suggest which blocks to verify
     const [first, second] = weakestReadLabels
     if (first && second && first !== second) {
       hint = <>Voor meer duidelijkheid, verifieer de <strong>{first}</strong> en de <strong>{second}</strong>.</>
     } else if (first) {
       hint = <>Voor meer duidelijkheid, verifieer de <strong>{first}</strong>.</>
     }
-  } else if (aiQualifier) {
-    // Personalise hint — bold the block names
+  } else if (overallEditTier === 'AIGegenereerd') {
+    // Reading is Geweldig but edit score is low → personalise hint
     const aiBlocks = weakestEditLabels.filter((_, i, arr) => arr.indexOf(_) === i).slice(0, 2)
     const [first, second] = aiBlocks
     if (first && second && first !== second) {
@@ -534,7 +559,6 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
 
   return (
     <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
-      {/* No border-b separator between header and body */}
       <div className="px-4 py-2.5">
         <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
@@ -550,7 +574,9 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
             Simon heeft de tekst gelezen en vindt de tekst{' '}
             <span className={`font-bold ${labelColour}`}>
               {overallReadTier}
-              {aiQualifier && <span className="font-normal"> en AI gegenereerd</span>}
+              {qualifier && (
+                <span className="font-normal"> {qualifier.connector} {qualifier.text}</span>
+              )}
             </span>.
           </p>
           {hint && (
