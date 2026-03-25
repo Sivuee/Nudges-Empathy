@@ -486,9 +486,7 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
           <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
         </div>
         <div className="px-4 pb-3 flex items-start gap-3">
-          <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
-            🧑‍🎓
-          </div>
+          <img src="/VS_Neutral.png" alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
           <p className="text-sm text-gray-600 leading-relaxed pt-1">
             De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
           </p>
@@ -529,13 +527,6 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
     ? 'text-amber-500'
     : READ_TIER_COLOUR[overallReadTier]
 
-  // Avatar: driven by reading tier only.
-  // Geweldig+AI stays neutral (🙂) to reflect the caveat.
-  const avatar = overallReadTier === 'Verwarrend' ? '😕'
-    : overallReadTier === 'Duidelijk'             ? '🙂'
-    : overallEditTier === 'AIGegenereerd'          ? '🙂'  // Geweldig but still AI → neutral
-    : /* Geweldig + Menselijk */                    '😄'
-
   // ── Hint ────────────────────────────────────────────────────────────────────
   let hint: React.ReactNode = null
   if (overallReadTier !== 'Geweldig') {
@@ -563,12 +554,17 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
         <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
       <div className="px-4 pb-3 flex items-start gap-3">
-        {/* ── Avatar placeholder ───────────────────────────────────────────────
-            Replace this div with <img> when you have custom art. See comment above.
-        ─────────────────────────────────────────────────────────────────────── */}
-        <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
-          {avatar}
-        </div>
+        <img
+          src={
+            overallReadTier === 'Verwarrend'
+              ? '/VS_Unhappy.png'
+              : overallReadTier === 'Geweldig' && overallEditTier === 'Menselijk'
+                ? '/VS_Happy.png'
+                : '/VS_Neutral.png'
+          }
+          alt="Simon"
+          className="w-14 h-14 flex-shrink-0 rounded-lg object-cover"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-sm text-gray-600 leading-relaxed">
             Simon heeft de tekst gelezen en vindt de tekst{' '}
@@ -1241,24 +1237,23 @@ function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText,
                   {active ? (
                     <div className="space-y-2">
                       {topics.map((topic: any, idx: number) => (
-                        <div key={topic.id} className="rounded-xl border border-input bg-gray-50 p-3 flex items-center gap-3">
+                        <div key={topic.id} className="rounded-xl border border-input bg-gray-50 p-3 flex items-center gap-3 group/topic">
                           <span className="w-6 h-6 rounded-full bg-[#039B96] text-white text-xs font-bold flex items-center justify-center shrink-0">
                             {idx + 1}
                           </span>
-                          <input defaultValue={topic.title} onBlur={e => updateTopic(phase, topic.id, e.target.value)}
-                            className="flex-1 border-0 bg-transparent text-sm focus:outline-none focus:ring-0 p-0 text-gray-800" />
-                          <button onClick={() => moveTopic(phase, idx, 'up')} disabled={idx === 0}
-                            className="p-1.5 rounded hover:bg-gray-200 disabled:opacity-30 text-gray-400 shrink-0">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                          </button>
-                          <button onClick={() => moveTopic(phase, idx, 'down')} disabled={idx === topics.length - 1}
-                            className="p-1.5 rounded hover:bg-gray-200 disabled:opacity-30 text-gray-400 shrink-0">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                          </button>
-                          <button onClick={() => deleteTopic(phase, topic.id)}
-                            className="p-1.5 rounded hover:bg-red-50 text-red-300 hover:text-red-500 shrink-0">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                          </button>
+                          <div className="flex-1 relative flex items-center gap-1.5 min-w-0">
+                            <input
+                              defaultValue={topic.title}
+                              onBlur={e => updateTopic(phase, topic.id, e.target.value)}
+                              title="Klik om de titel te bewerken"
+                              className="flex-1 border-0 bg-transparent text-sm focus:outline-none focus:ring-0 p-0 text-gray-800 hover:text-[#039B96] focus:border-b focus:border-[#039B96] cursor-text transition-colors min-w-0"
+                            />
+                            <svg className="w-3.5 h-3.5 text-gray-300 group-hover/topic:text-[#039B96] shrink-0 transition-colors pointer-events-none"
+                              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </div>
                         </div>
                       ))}
                     </div>
