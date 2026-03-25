@@ -263,19 +263,22 @@ const PHASE_ID_TO_OUTLINE: Record<string, string> = {
   'phase-afronding':   'afronding',
 }
 
-const TIER_STYLE: Record<string, { text: string }> = {
-  Verwarrend:  { text: 'text-red-600'     },
-  Duidelijk:   { text: 'text-amber-600'   },
-  Geweldig:    { text: 'text-emerald-500' },
-  Uitstekend:  { text: 'text-emerald-700' },
+// ─── Reading tier — three levels ────────────────────────────────────────────
+type ReadingTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig'
+
+// ─── Edit tier — binary: either enough edits or not ─────────────────────────
+type EditTier = 'AIGegenereerd' | 'Menselijk'
+
+// Colour for the reading tier label in the verdict sentence
+const READ_TIER_COLOUR: Record<ReadingTier, string> = {
+  Verwarrend: 'text-red-600',
+  Duidelijk:  'text-amber-500',
+  // Geweldig + Menselijk → green; Geweldig + AIGegenereerd → amber (see SimonPanel)
+  Geweldig:   'text-emerald-600',
 }
 
-// ─── Tier type — four levels ──────────────────────────────────────────────────
-// Uitstekend is only reached when ALL blocks are Geweldig on BOTH read AND edit.
-type ScoreTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig' | 'Uitstekend'
-
 // ─── Per-phase minimum reading times ─────────────────────────────────────────
-// minMs  = hard gate: below this the block stays Verwarrend regardless.
+// minMs      = hard gate: below this the block stays Verwarrend.
 // geweldigMs = time at which the block reaches full (80 pt) time score.
 const PHASE_READ_CONFIG: Record<string, { minMs: number; geweldigMs: number }> = {
   'phase-introductie': { minMs:  8_000, geweldigMs: 30_000 },
@@ -298,18 +301,18 @@ function readScoreFromMetrics(
   return Math.min(100, timeScore + scrollScore + mouseScore)
 }
 
-// ─── Per-phase edit score ─────────────────────────────────────────────────────
-// Same tier structure as reading score, but based on Levenshtein distance
-// between the current phase text and the original EXPERIMENT_TEXT phase.
-//
-// Thresholds (fraction of original phase character count changed):
-//   < EDIT_MIN_RATIO  → score 0  (Verwarrend — not meaningfully edited)
-//   ≥ EDIT_MIN_RATIO  → score scales linearly up to EDIT_GEWELDIG_RATIO
-const EDIT_MIN_RATIO      = 0.03   // < 3 % changed → score 0
-const EDIT_GEWELDIG_RATIO = 0.18   // ≥ 18 % changed → full score (80 pts)
+function readTierFromScore(score: number): ReadingTier {
+  if (score >= 65) return 'Geweldig'
+  if (score >= 30) return 'Duidelijk'
+  return 'Verwarrend'
+}
+
+// ─── Per-phase edit score — binary ───────────────────────────────────────────
+// Below EDIT_MENSELIJK_RATIO of characters changed → AIGegenereerd.
+// At or above → Menselijk. No middle tier.
+const EDIT_MENSELIJK_RATIO = 0.05   // ≥ 5 % of original chars changed → Menselijk
 
 // Split EXPERIMENT_TEXT into per-phase buckets once at module load.
-// Keys match OutlinePhase names: 'introductie' | 'instructie' | 'verwerking' | 'afronding'
 const ORIGINAL_PHASE_TEXT: Record<string, string> = (() => {
   const buckets: Record<string, string[]> = {
     introductie: [], instructie: [], verwerking: [], afronding: [],
@@ -348,23 +351,15 @@ function simpleLevenshtein(a: string, b: string): number {
   return prev[n]
 }
 
-function editScoreForPhase(currentPhaseText: string, phaseKey: string): number {
+function editTierForPhase(currentPhaseText: string, phaseKey: string): EditTier {
   const original = ORIGINAL_PHASE_TEXT[PHASE_ID_TO_OUTLINE[phaseKey] ?? ''] ?? ''
-  if (!original) return 0
+  if (!original) return 'AIGegenereerd'
   const dist  = simpleLevenshtein(
     currentPhaseText.replace(/\s+/g, ' ').trim(),
     original.replace(/\s+/g, ' ').trim()
   )
   const ratio = dist / Math.max(1, original.length)
-  if (ratio < EDIT_MIN_RATIO) return 0
-  const editScore = Math.min(80, Math.round((ratio / EDIT_GEWELDIG_RATIO) * 80))
-  return Math.min(100, editScore)
-}
-
-function tierFromScore(score: number): Exclude<ScoreTier, 'Uitstekend'> {
-  if (score >= 65) return 'Geweldig'
-  if (score >= 30) return 'Duidelijk'
-  return 'Verwarrend'
+  return ratio >= EDIT_MENSELIJK_RATIO ? 'Menselijk' : 'AIGegenereerd'
 }
 
 // ─── Analysis types ───────────────────────────────────────────────────────────
@@ -372,19 +367,18 @@ interface SectionReading {
   sectionId:  string
   label:      string
   readScore:  number
-  readTier:   Exclude<ScoreTier, 'Uitstekend'>
-  editScore:  number
-  editTier:   Exclude<ScoreTier, 'Uitstekend'>
+  readTier:   ReadingTier
+  editTier:   EditTier
 }
 
 interface ReadingAnalysis {
-  sections:     SectionReading[]
-  averageScore: number
-  // Overall tier — Uitstekend only when every block is Geweldig on both axes
-  overallTier:  ScoreTier
-  // Two lowest-scoring blocks by read score (distinct labels, used for hint)
+  sections:          SectionReading[]
+  averageReadScore:  number
+  overallReadTier:   ReadingTier
+  overallEditTier:   EditTier        // Menselijk only if ALL phases are Menselijk
+  // Two lowest-scoring read blocks (distinct labels)
   weakestReadLabels: string[]
-  // Two lowest-scoring blocks by edit score (distinct labels, used for personalise hint)
+  // Two lowest-scoring edit blocks by Levenshtein ratio (distinct labels)
   weakestEditLabels: string[]
 }
 
@@ -394,70 +388,46 @@ function buildReadingAnalysis(
 ): ReadingAnalysis {
   const sections: SectionReading[] = PHASE_SECTION_IDS.map((id) => {
     const readScore = readScoreFromMetrics(sectionMetrics[id], id)
-    const readTier  = tierFromScore(readScore)
-    // phaseBlocks key is the OutlinePhase name (without 'phase-' prefix)
+    const readTier  = readTierFromScore(readScore)
     const outlineKey = PHASE_ID_TO_OUTLINE[id] ?? ''
     const currentText = (phaseBlocks[outlineKey] ?? []).join('\n')
-    const editScore = editScoreForPhase(currentText, id)
-    const editTier  = tierFromScore(editScore)
-    return { sectionId: id, label: PHASE_SECTION_LABELS[id], readScore, readTier, editScore, editTier }
+    const editTier  = editTierForPhase(currentText, id)
+    return { sectionId: id, label: PHASE_SECTION_LABELS[id], readScore, readTier, editTier }
   })
 
-  const averageScore = Math.round(
+  const averageReadScore = Math.round(
     sections.reduce((s, r) => s + r.readScore, 0) / sections.length
   )
+  const overallReadTier = readTierFromScore(averageReadScore)
 
-  // Uitstekend only when every block is Geweldig on both axes
-  const allGeweldig = sections.every(s => s.readTier === 'Geweldig' && s.editTier === 'Geweldig')
-  const overallTier: ScoreTier = allGeweldig
-    ? 'Uitstekend'
-    : tierFromScore(averageScore)
+  // Overall edit is Menselijk only when ALL phases have been edited enough
+  const overallEditTier: EditTier = sections.every(s => s.editTier === 'Menselijk')
+    ? 'Menselijk'
+    : 'AIGegenereerd'
 
-  // Two weakest read blocks — sort ascending by readScore, take top 2 distinct labels
-  const byReadScore = [...sections].sort((a, b) => a.readScore - b.readScore)
-  const weakestReadLabels = byReadScore.slice(0, 2).map(s => s.label)
+  // Two weakest read blocks (sorted ascending by readScore)
+  const weakestReadLabels = [...sections]
+    .sort((a, b) => a.readScore - b.readScore)
+    .slice(0, 2)
+    .map(s => s.label)
 
-  // Two weakest edit blocks — sort ascending by editScore, take top 2 distinct labels
-  const byEditScore = [...sections].sort((a, b) => a.editScore - b.editScore)
-  const weakestEditLabels = byEditScore.slice(0, 2).map(s => s.label)
+  // Two weakest edit blocks — approximate by checking which phases are still AIGegenereerd first,
+  // then fall back to all phases sorted by how close they are to the threshold.
+  // Since editTier is binary, we define "weakest" as: AIGegenereerd phases come first.
+  const weakestEditLabels = [...sections]
+    .sort((a, b) => {
+      // AIGegenereerd < Menselijk
+      if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
+      // Within same tier, fall back to readScore for stability
+      return a.readScore - b.readScore
+    })
+    .slice(0, 2)
+    .map(s => s.label)
 
-  return { sections, averageScore, overallTier, weakestReadLabels, weakestEditLabels }
-}
-
-// ─── Hint logic ───────────────────────────────────────────────────────────────
-// Returns the hint string to show below the verdict, or null if no hint needed.
-function buildHint(analysis: ReadingAnalysis): string | null {
-  const { overallTier, sections, weakestReadLabels, weakestEditLabels } = analysis
-
-  if (overallTier === 'Uitstekend') return null
-
-  const avgReadTier = tierFromScore(analysis.averageScore)
-
-  // Reading is Geweldig but edit is not → personalise hint
-  if (avgReadTier === 'Geweldig' && overallTier !== 'Uitstekend') {
-    const [first, second] = weakestEditLabels
-    if (first && second && first !== second) {
-      return `Om de les verder te verbeteren, maak het persoonlijker in de ${first} of ${second}.`
-    }
-    if (first) {
-      return `Om de les verder te verbeteren, maak het persoonlijker in de ${first}.`
-    }
-    return null
-  }
-
-  // Reading is not yet Geweldig → read hint with two distinct block names
-  const [first, second] = weakestReadLabels
-  if (first && second && first !== second) {
-    return `Voor meer duidelijkheid, verifieer de ${first} en de ${second}.`
-  }
-  if (first) {
-    return `Voor meer duidelijkheid, verifieer de ${first}.`
-  }
-  return null
+  return { sections, averageReadScore, overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels }
 }
 
 // Mounts the IntersectionObserver tracker + polls every 500ms.
-// Must only mount after the phase cards are in the DOM.
 function SimonTracker({ onAnalysis, phaseBlocks }: {
   onAnalysis: (a: ReadingAnalysis) => void
   phaseBlocks: Record<string, string[]>
@@ -484,60 +454,109 @@ function SimonTracker({ onAnalysis, phaseBlocks }: {
   return null
 }
 
-// SimonPanel — image left, text right (matching prototype screenshot).
-// Sits inside the Max chat card, below the message bubble.
-// To replace the emoji avatar with a custom image:
-//   <img src="/simon-happy.png" alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
-// Place the image in /public. Use different images per state:
-//   src={overallTier === 'Uitstekend' || overallTier === 'Geweldig' ? '/simon-happy.png' : overallTier === 'Duidelijk' ? '/simon-neutral.png' : '/simon-sad.png'}
+// ─── SimonPanel ───────────────────────────────────────────────────────────────
+// Verdict logic:
+//   Reading tier (Verwarrend / Duidelijk / Geweldig) drives the label.
+//   "en AI gegenereerd" qualifier is appended ONLY when reading = Geweldig
+//   AND edit = AIGegenereerd. When that qualifier is shown, the colour stays
+//   amber (not green) and the avatar stays at the Duidelijk face.
+//
+// Hints:
+//   • Reading < Geweldig  → "Voor meer duidelijkheid, verifieer de [block] en de [block]."
+//   • Reading = Geweldig + edit = AIGegenereerd
+//                          → "Om de les verder te verbeteren, maak het persoonlijker in de [block] of [block]."
+//   • Reading = Geweldig + edit = Menselijk → no hint
+//
+// To replace emoji with a custom image, swap the avatar div for:
+//   <img
+//     src={readTier === 'Geweldig' && editTier === 'Menselijk' ? '/simon-happy.png'
+//       : readTier === 'Duidelijk' || (readTier === 'Geweldig' && editTier === 'AIGegenereerd')
+//         ? '/simon-neutral.png' : '/simon-sad.png'}
+//     alt="Simon"
+//     className="w-14 h-14 flex-shrink-0 rounded-lg object-cover"
+//   />
+//   Place image files in the /public folder of the project.
 function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
-  const hasData    = analysis !== null && analysis.sections.some(s => s.readScore > 0)
-  const tier       = analysis?.overallTier ?? 'Verwarrend'
-  const hint       = analysis ? buildHint(analysis) : null
-  const colorClass = TIER_STYLE[tier]?.text ?? 'text-gray-800'
-  const avatar     = !hasData ? '🧑\u200d🎓'
-    : tier === 'Uitstekend'         ? '🤩'
-    : tier === 'Geweldig'           ? '😄'
-    : tier === 'Duidelijk'          ? '🙂'
-    : /* Verwarrend */                '😕'
+  const hasData = analysis !== null && analysis.sections.some(s => s.readScore > 0)
+
+  if (!hasData || !analysis) {
+    return (
+      <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
+        <div className="px-4 py-2.5">
+          <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
+        </div>
+        <div className="px-4 pb-3 flex items-start gap-3">
+          <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
+            🧑‍🎓
+          </div>
+          <p className="text-sm text-gray-600 leading-relaxed pt-1">
+            De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  const { overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels } = analysis
+
+  // When reading = Geweldig but not yet edited → show amber "Geweldig" + Duidelijk avatar
+  const aiQualifier = overallReadTier === 'Geweldig' && overallEditTier === 'AIGegenereerd'
+
+  // Colour: amber when aiQualifier, otherwise reading tier colour
+  const labelColour = aiQualifier ? 'text-amber-500' : READ_TIER_COLOUR[overallReadTier]
+
+  // Avatar: sad=Verwarrend, neutral=Duidelijk or (Geweldig+AI), happy=Geweldig+Menselijk
+  const avatar = overallReadTier === 'Verwarrend' ? '😕'
+    : overallReadTier === 'Duidelijk'             ? '🙂'
+    : aiQualifier                                 ? '🙂'   // Geweldig but still AI → neutral
+    : /* Geweldig + Menselijk */                    '😄'
+
+  // Hint — returns JSX so block names can be bold
+  let hint: React.ReactNode = null
+  if (overallReadTier !== 'Geweldig') {
+    // Reading hint — bold the block names
+    const [first, second] = weakestReadLabels
+    if (first && second && first !== second) {
+      hint = <>Voor meer duidelijkheid, verifieer de <strong>{first}</strong> en de <strong>{second}</strong>.</>
+    } else if (first) {
+      hint = <>Voor meer duidelijkheid, verifieer de <strong>{first}</strong>.</>
+    }
+  } else if (aiQualifier) {
+    // Personalise hint — bold the block names
+    const aiBlocks = weakestEditLabels.filter((_, i, arr) => arr.indexOf(_) === i).slice(0, 2)
+    const [first, second] = aiBlocks
+    if (first && second && first !== second) {
+      hint = <>Om de les verder te verbeteren, maak het persoonlijker in de <strong>{first}</strong> of <strong>{second}</strong>.</>
+    } else if (first) {
+      hint = <>Om de les verder te verbeteren, maak het persoonlijker in de <strong>{first}</strong>.</>
+    }
+  }
 
   return (
     <div className="mx-4 mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-blue-100">
+      {/* No border-b separator between header and body */}
+      <div className="px-4 py-2.5">
         <p className="text-sm font-semibold text-gray-800">Simon de virtuele student</p>
       </div>
-      <div className="px-4 py-3 flex items-start gap-3">
-        {/* ── Avatar ──────────────────────────────────────────────────────────
-            CUSTOM IMAGE: replace this div with an <img> tag, e.g.:
-              <img
-                src={overallTier === 'Uitstekend' || overallTier === 'Geweldig'
-                  ? '/simon-happy.png'
-                  : overallTier === 'Duidelijk' ? '/simon-neutral.png' : '/simon-sad.png'}
-                alt="Simon"
-                className="w-14 h-14 flex-shrink-0 rounded-lg object-cover"
-              />
-            Place your image files in the /public folder of the project.
-        ─────────────────────────────────────────────────────────────────── */}
+      <div className="px-4 pb-3 flex items-start gap-3">
+        {/* ── Avatar placeholder ───────────────────────────────────────────────
+            Replace this div with <img> when you have custom art. See comment above.
+        ─────────────────────────────────────────────────────────────────────── */}
         <div className="w-14 h-14 flex-shrink-0 rounded-lg bg-blue-100 flex items-center justify-center text-3xl select-none">
           {avatar}
         </div>
         <div className="flex-1 min-w-0">
-          {!hasData ? (
-            <p className="text-sm text-gray-600 leading-relaxed">
-              De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
+          <p className="text-sm text-gray-600 leading-relaxed">
+            Simon heeft de tekst gelezen en vindt de tekst{' '}
+            <span className={`font-bold ${labelColour}`}>
+              {overallReadTier}
+              {aiQualifier && <span className="font-normal"> en AI gegenereerd</span>}
+            </span>.
+          </p>
+          {hint && (
+            <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
+              {hint}
             </p>
-          ) : (
-            <>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Simon heeft de tekst gelezen en vindt de tekst{' '}
-                <span className={`font-bold ${colorClass}`}>{tier}.</span>
-              </p>
-              {hint && (
-                <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
-                  {hint}
-                </p>
-              )}
-            </>
           )}
         </div>
       </div>
@@ -572,6 +591,7 @@ function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: Re
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 function ExperimentPage() {
+
   const searchParams = useSearchParams()
 
   const [appStep, setAppStep]           = useState<AppStep>('details')
