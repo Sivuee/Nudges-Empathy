@@ -782,7 +782,7 @@ function ExperimentPage() {
     const lev = levenshtein(plainText, EXPERIMENT_TEXT)
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
     try {
-      const res = await fetch('https://formspree.io/f/', {
+      const res = await fetch('https://formspree.io/f/mqedwepd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
