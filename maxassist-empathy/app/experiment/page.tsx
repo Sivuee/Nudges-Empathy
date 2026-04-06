@@ -55,7 +55,7 @@ const EDU_LEVELS = [
   { id: 'Anders', label: 'Anders', subLevels: [] },
 ]
 
-type AppStep = 'details' | 'authoring' | 'completed'
+type AppStep = 'library' | 'details' | 'authoring' | 'completed'
 type AuthoringTab = 'lesplan' | 'lesoverzicht' | 'les' | 'voorvertoning'
 type OutlinePhase = 'introductie' | 'instructie' | 'verwerking' | 'afronding'
 
@@ -241,7 +241,7 @@ function ChatPanel({ lesdoel, message }: { lesdoel: string; message?: string }) 
 }
 
 // ─── Simon Nudge (Empathy condition only) ─────────────────────────────────────
-// Replaces ChatPanel in LesTab when condition === 'empathy'.
+// Replaces ChatPanel in LesTab in the student condition.
 // Identical outer structure to ChatPanel, with Simon panel added below Max's message.
 
 // SectionReading, ReadingAnalysis, and ScoreTier are defined in the Simon block below
@@ -389,13 +389,19 @@ interface ReadingAnalysis {
 
 function buildReadingAnalysis(
   sectionMetrics: Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>,
-  phaseBlocks: Record<string, string[]>
+  phaseBlocks: Record<string, string[]>,
+  manualEditTexts?: Record<string, string | null>
 ): ReadingAnalysis {
   const sections: SectionReading[] = PHASE_SECTION_IDS.map((id) => {
     const readScore = readScoreFromMetrics(sectionMetrics[id], id)
     const readTier  = readTierFromScore(readScore)
     const outlineKey = PHASE_ID_TO_OUTLINE[id] ?? ''
-    const currentText = (phaseBlocks[outlineKey] ?? []).join('\n')
+    // Student condition: use manual edit text if available; badge condition: use phaseBlocks
+    const currentText = manualEditTexts
+      ? (manualEditTexts[outlineKey] !== null && manualEditTexts[outlineKey] !== undefined
+          ? stripHtmlForEdit(manualEditTexts[outlineKey] as string)
+          : (phaseBlocks[outlineKey] ?? []).join('\n'))
+      : (phaseBlocks[outlineKey] ?? []).join('\n')
     const editTier  = editTierForPhase(currentText, id)
     return { sectionId: id, label: PHASE_SECTION_LABELS[id], readScore, readTier, editTier }
   })
@@ -433,15 +439,18 @@ function buildReadingAnalysis(
 }
 
 // Mounts the IntersectionObserver tracker + polls every 500ms.
-function SimonTracker({ onAnalysis, phaseBlocks }: {
+function SimonTracker({ onAnalysis, phaseBlocks, manualEditTexts }: {
   onAnalysis: (a: ReadingAnalysis) => void
   phaseBlocks: Record<string, string[]>
+  manualEditTexts?: Record<string, string | null>
 }) {
   const { getSnapshot } = useReadingTracker([...PHASE_SECTION_IDS])
   const callbackRef     = useRef(onAnalysis)
   callbackRef.current   = onAnalysis
   const blocksRef       = useRef(phaseBlocks)
   blocksRef.current     = phaseBlocks
+  const manualRef       = useRef(manualEditTexts)
+  manualRef.current     = manualEditTexts
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -449,7 +458,8 @@ function SimonTracker({ onAnalysis, phaseBlocks }: {
       callbackRef.current(
         buildReadingAnalysis(
           snap.sections as Record<string, { totalTimeMs: number; maxScrollDepth: number; mouseMovements: number; visits: number }>,
-          blocksRef.current
+          blocksRef.current,
+          manualRef.current
         )
       )
     }, 500)
@@ -621,7 +631,7 @@ function ExperimentPage() {
 
   const searchParams = useSearchParams()
 
-  const [appStep, setAppStep]           = useState<AppStep>('details')
+  const [appStep, setAppStep]           = useState<AppStep>('library')
   // Top-level tab: details | authoring (like original Lesdetails / Auteursomgeving)
   const [topTab, setTopTab]             = useState<'details' | 'authoring'>('details')
   // Inner authoring step
@@ -713,13 +723,13 @@ function ExperimentPage() {
   const [submitted, setSubmitted]           = useState(false)
   const [submitError, setSubmitError]       = useState<string | null>(null)
   const [participantId, setParticipantId]   = useState('unknown')
-  const [condition, setCondition]           = useState('empathy')
+  const [condition, setCondition]           = useState('student')
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
     setParticipantId(p.get('pid') || 'unknown')
-    // This deployment is always the empathy condition
-    setCondition('empathy')
+    // This deployment is always the student condition
+    setCondition('student')
   }, [])
 
   // Reading analysis state — lifted here so it survives tab switches
@@ -727,6 +737,15 @@ function ExperimentPage() {
   const stableSetAnalysis = useCallback((a: ReadingAnalysis) => setReadingAnalysis(a), [])
   // Tracker mounted flag — wait one frame after LesTab mounts so phase cards are in DOM
   const [trackerMounted, setTrackerMounted] = useState(false)
+
+  // Manual edit tracking — only counts explicit user keystrokes, not AI generation
+  const [manualEditTexts, setManualEditTexts] = useState<Record<string, string | null>>({
+    introductie: null, instructie: null, verwerking: null, afronding: null,
+  })
+
+  const handleManualInput = useCallback((phase: string, html: string) => {
+    setManualEditTexts(prev => ({ ...prev, [phase]: html }))
+  }, [])
 
   const mainLevel    = EDU_LEVELS.find(l => l.id === educatieNiveau)
   const subLevel     = mainLevel?.subLevels?.find((s: any) => s.id === educatieSpecifiekNiveau) as any
@@ -763,7 +782,7 @@ function ExperimentPage() {
     const lev = levenshtein(plainText, EXPERIMENT_TEXT)
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
     try {
-      const res = await fetch('https://formspree.io/f/mqedwepd', {
+      const res = await fetch('https://formspree.io/f/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -774,18 +793,28 @@ function ExperimentPage() {
           errors_uncorrected: uncorrected.join(','),
           errors_undetectable: undetectable.join(','),
           final_text: plainText,
+          simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
+          simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
+          simon_read_score: readingAnalysis?.averageReadScore ?? 0,
           submitted_at: new Date().toISOString(),
         }),
       })
       if (!res.ok) throw new Error('failed')
       setSubmitted(true)
-      setShareModalOpen(false); setAppStep('completed')
+      setShareModalOpen(false); setAppStep('library')
     } catch {
       setSubmitError('Er is iets misgegaan. Probeer het opnieuw.')
     } finally {
       setSubmitting(false)
     }
   }
+
+  if (appStep === 'library') return (
+    <LibraryScreen
+      submitted={submitted}
+      onNewLesson={() => { setAppStep('details'); setSubmitted(false) }}
+    />
+  )
 
   if (appStep === 'completed') return <CompletionScreen />
 
@@ -879,6 +908,7 @@ function ExperimentPage() {
                       loaded={lesLoaded} setLoaded={setLesLoaded}
                       trackerMounted={trackerMounted} setTrackerMounted={setTrackerMounted}
                       readingAnalysis={readingAnalysis} onReadingAnalysis={stableSetAnalysis}
+                      manualEditTexts={manualEditTexts} onManualInput={handleManualInput}
                       onPrev={() => setActiveTab('lesoverzicht')}
                       onNext={() => setActiveTab('voorvertoning')} />
                   )}
@@ -1344,6 +1374,16 @@ function stripHtml(html: string): string {
     .replace(/\n{3,}/g, '\n\n').trim()
 }
 
+// Same as stripHtml but used specifically for edit tier comparison
+function stripHtmlForEdit(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(p|div|h[1-6]|li)[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+    .replace(/\n{3,}/g, '\n\n').trim()
+}
+
 function markdownToHtml(text: string): string {
   const lines = text.split('\n')
   const parts: string[] = []
@@ -1390,7 +1430,7 @@ function inlineFormat(s: string): string {
   return s
 }
 
-function TextBlock({ content, onUpdate }: { content: string; onUpdate: (v: string) => void }) {
+function TextBlock({ content, onUpdate, onManualInput }: { content: string; onUpdate: (v: string) => void; onManualInput?: (html: string) => void }) {
   const editorRef = React.useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1420,6 +1460,11 @@ function TextBlock({ content, onUpdate }: { content: string; onUpdate: (v: strin
     if (editorRef.current) onUpdate(editorRef.current.innerHTML)
   }
 
+  // Fires on every manual keystroke — used by student condition for edit tracking
+  const handleInput = () => {
+    if (editorRef.current && onManualInput) onManualInput(editorRef.current.innerHTML)
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
       <EditorToolbar onFormat={handleFormat} />
@@ -1429,6 +1474,7 @@ function TextBlock({ content, onUpdate }: { content: string; onUpdate: (v: strin
           contentEditable
           suppressContentEditableWarning
           onBlur={handleBlur}
+          onInput={handleInput}
           className={[
             'min-h-[120px] focus:outline-none text-gray-800',
             '[&_p]:mb-4 [&_p]:text-base [&_p]:leading-relaxed',
@@ -1446,8 +1492,8 @@ function TextBlock({ content, onUpdate }: { content: string; onUpdate: (v: strin
   )
 }
 
-function PhaseCard({ phase, blocks, onUpdate, visible, onToggle }: {
-  phase: OutlinePhase; blocks: string[]; onUpdate: (b: string[]) => void; visible: boolean; onToggle: () => void
+function PhaseCard({ phase, blocks, onUpdate, visible, onToggle, onManualInput }: {
+  phase: OutlinePhase; blocks: string[]; onUpdate: (b: string[]) => void; visible: boolean; onToggle: () => void; onManualInput?: (html: string) => void
 }) {
   const meta = PHASE_META[phase]
   const displayContent = blocks.join('\n\n')
@@ -1470,6 +1516,7 @@ function PhaseCard({ phase, blocks, onUpdate, visible, onToggle }: {
         <TextBlock
           content={displayContent}
           onUpdate={v => onUpdate([v])}
+          onManualInput={onManualInput}
         />
       </div>
     </div>
@@ -1477,14 +1524,15 @@ function PhaseCard({ phase, blocks, onUpdate, visible, onToggle }: {
 }
 
 function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition,
-  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis, onPrev, onNext }: any) {
+  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
+  manualEditTexts, onManualInput, onPrev, onNext }: any) {
   useEffect(() => {
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 20000); return () => clearTimeout(t) }
   }, [loaded, setLoaded])
 
   // Mount the tracker one frame after phase cards are in the DOM
   useEffect(() => {
-    if (condition === 'empathy' && loaded && !trackerMounted) {
+    if (condition === 'student' && loaded && !trackerMounted) {
       const raf = requestAnimationFrame(() => setTrackerMounted(true))
       return () => cancelAnimationFrame(raf)
     }
@@ -1520,9 +1568,13 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
     <div className="flex h-full overflow-hidden relative">
       <MaxLoader visible={!loaded} message="Max genereert de volledige lesinhoud voor je. Pak vast een kopje koffie! ☕" />
 
-      {/* SimonTracker: only mounted in empathy condition, after phase cards are in DOM */}
-      {condition === 'empathy' && trackerMounted && (
-        <SimonTracker onAnalysis={onReadingAnalysis} phaseBlocks={phaseBlocks} />
+      {/* SimonTracker: only mounted in student condition, after phase cards are in DOM */}
+      {condition === 'student' && trackerMounted && (
+        <SimonTracker
+          onAnalysis={onReadingAnalysis}
+          phaseBlocks={phaseBlocks}
+          manualEditTexts={manualEditTexts}
+        />
       )}
 
       <div className="w-full lg:w-3/5 border-r bg-white overflow-y-auto p-6 md:p-10 pb-32">
@@ -1536,7 +1588,8 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
               blocks={phaseBlocks[phase]}
               onUpdate={b => updatePhase(phase, b)}
               visible={visiblePhases.has(phase)}
-              onToggle={() => togglePhase(phase)} />
+              onToggle={() => togglePhase(phase)}
+              onManualInput={(html: string) => onManualInput(phase, html)} />
           ))}
         </div>
 
@@ -1546,11 +1599,132 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
         </div>
       </div>
 
-      {/* Right panel: empathy gets Simon, everyone else gets original ChatPanel */}
-      {condition === 'empathy'
-        ? <EmpathyChatPanel lesdoel={lesdoel} analysis={readingAnalysis} />
-        : <ChatPanel lesdoel={lesdoel} message="De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!" />
-      }
+      {/* Right panel: student gets Simon on top + AI chat below */}
+      <StudentLesRightPanel lesdoel={lesdoel} analysis={readingAnalysis} />
+    </div>
+  )
+}
+
+// ─── Student condition: right panel (Simon on top + AI chat below) ────────────
+function StudentLesRightPanel({ lesdoel, analysis }: { lesdoel: string; analysis: ReadingAnalysis | null }) {
+  const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; text: string }[]>([
+    { role: 'assistant', text: 'De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur! Ik help je graag als je vragen hebt over de les.' }
+  ])
+  const [input, setInput]       = useState('')
+  const [thinking, setThinking] = useState(false)
+  const bottomRef               = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, thinking])
+
+  const sendMessage = async () => {
+    const text = input.trim()
+    if (!text || thinking) return
+    setInput('')
+    setMessages(prev => [...prev, { role: 'user', text }])
+    setThinking(true)
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 400,
+          system: `Je bent Max, een behulpzame AI-assistent voor docenten. De docent werkt aan een les met lesdoel: "${lesdoel}". Geef korte, praktische antwoorden in het Nederlands (max 3 zinnen).`,
+          messages: [
+            ...messages.map(m => ({ role: m.role, content: m.text })),
+            { role: 'user', content: text }
+          ],
+        }),
+      })
+      const data = await res.json()
+      const reply = data.content?.find((b: any) => b.type === 'text')?.text ?? 'Sorry, ik kon geen antwoord genereren.'
+      setMessages(prev => [...prev, { role: 'assistant', text: reply }])
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', text: 'Er is iets misgegaan. Probeer het opnieuw.' }])
+    } finally {
+      setThinking(false)
+    }
+  }
+
+  return (
+    <div className="hidden lg:flex lg:flex-col lg:w-2/5 bg-white overflow-hidden">
+      {/* Top: lesdoel + Simon */}
+      <div className="p-4 border-b border-gray-100 shrink-0 overflow-y-auto max-h-[55%]">
+        <LesdoelCard lesdoel={lesdoel} />
+        <div className="border border-gray-200 rounded-lg bg-white flex flex-col overflow-hidden mt-4">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
+            <span className="text-sm font-medium">Max</span>
+          </div>
+          <div className="p-4">
+            <div className="flex gap-2 items-end">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
+              <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700 max-w-[85%]">
+                De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
+              </div>
+            </div>
+          </div>
+          <SimonPanel analysis={analysis} />
+        </div>
+      </div>
+
+      {/* Bottom: AI chat */}
+      <div className="flex flex-col flex-1 min-h-0 border-t border-gray-100">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-100 shrink-0">
+          <div className="w-6 h-6 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white text-[9px] font-bold shrink-0">M</div>
+          <span className="text-xs font-semibold text-gray-700">Chat met Max</span>
+        </div>
+
+        {/* Message list */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex gap-2 items-end ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              {msg.role === 'assistant' && (
+                <div className="w-6 h-6 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[9px] font-bold">M</div>
+              )}
+              <div className={`px-3 py-2 rounded-xl text-xs leading-relaxed max-w-[82%] ${
+                msg.role === 'user'
+                  ? 'bg-[#039B96] text-white rounded-br-none'
+                  : 'bg-[#FAFBFD] text-gray-700 rounded-bl-none border border-gray-100'
+              }`}>
+                {msg.text}
+              </div>
+            </div>
+          ))}
+          {thinking && (
+            <div className="flex gap-2 items-end">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[9px] font-bold">M</div>
+              <div className="bg-[#FAFBFD] border border-gray-100 rounded-xl rounded-bl-none px-3 py-2 flex gap-1">
+                {[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#039B96] animate-bounce" style={{ animationDelay: `${i * 0.18}s` }} />)}
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input row */}
+        <div className="px-3 py-2 border-t border-gray-100 shrink-0 flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') sendMessage() }}
+            placeholder="Stel Max een vraag..."
+            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#039B96]"
+          />
+          <button
+            onClick={sendMessage}
+            disabled={!input.trim() || thinking}
+            className="w-8 h-8 rounded-lg bg-[#039B96] disabled:bg-gray-200 flex items-center justify-center shrink-0 transition-colors"
+          >
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1728,6 +1902,111 @@ function ShareModal({ tab, setTab, onClose, onDeelMetCollega, onLesOpSlot, submi
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Library Screen ───────────────────────────────────────────────────────────
+function LibraryScreen({ submitted, onNewLesson }: { submitted: boolean; onNewLesson: () => void }) {
+  const exampleLessons = [
+    { title: 'Breuken optellen en aftrekken', subject: 'Wiskunde', level: 'Basisonderwijs groep 7', date: '12 mrt 2025' },
+    { title: 'De Tweede Wereldoorlog: oorzaken en gevolgen', subject: 'Geschiedenis', level: 'VMBO-T', date: '5 apr 2025' },
+    { title: 'Fotosynthese en celademhaling', subject: 'Biologie', level: 'HAVO 2', date: '18 apr 2025' },
+  ]
+
+  return (
+    <div className="min-h-screen bg-[#FAFBFD]" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div className="flex h-screen overflow-hidden">
+        {/* Sidebar */}
+        <aside className="hidden md:flex flex-col w-16 bg-white border-r border-gray-100 pt-5 items-center shrink-0">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white font-bold text-sm">M</div>
+        </aside>
+
+        <main className="flex-1 overflow-y-auto p-6 md:p-10">
+          <div className="max-w-4xl mx-auto">
+
+            {/* Header */}
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">Lessenbibliotheek</h1>
+                <p className="text-sm text-gray-500 mt-1">Overzicht van al je gemaakte lessen</p>
+              </div>
+              <button
+                onClick={onNewLesson}
+                className="flex items-center gap-2 px-5 py-2.5 bg-[#039B96] text-white text-sm font-semibold rounded-lg hover:bg-[#027a76] transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Nieuwe les maken
+              </button>
+            </div>
+
+            {/* Completion notice */}
+            {submitted && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+                <svg className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-emerald-900">Les succesvol gedeeld!</p>
+                  <p className="text-sm text-emerald-700 mt-0.5">Ga nu terug naar Qualtrics om de vragenlijst af te ronden.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Lesson cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+              {/* Newly created lesson card (only shown after submission) */}
+              {submitted && (
+                <div className="bg-white border-2 border-[#039B96] rounded-xl p-5 flex flex-col gap-3 shadow-sm">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-[#039B96] uppercase tracking-wide mb-1">Zojuist gemaakt</p>
+                      <h3 className="text-base font-semibold text-gray-900 leading-snug">Formatieve vs. Summatieve evaluatie</h3>
+                    </div>
+                    <span className="ml-2 shrink-0 text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">Gedeeld</span>
+                  </div>
+                  <div className="text-xs text-gray-500 space-y-0.5">
+                    <p>MBO Niveau 4</p>
+                    <p>{new Date().toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  </div>
+                  <div className="h-px bg-gray-100" />
+                  <p className="text-xs text-gray-400">60 min · 4 fasen</p>
+                </div>
+              )}
+
+              {/* Example lessons */}
+              {exampleLessons.map((les, i) => (
+                <div key={i} className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3 hover:border-gray-300 transition-colors cursor-default">
+                  <div className="flex items-start justify-between">
+                    <h3 className="text-base font-semibold text-gray-900 leading-snug flex-1 min-w-0 pr-2">{les.title}</h3>
+                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">Concept</span>
+                  </div>
+                  <div className="text-xs text-gray-500 space-y-0.5">
+                    <p>{les.subject} · {les.level}</p>
+                    <p>{les.date}</p>
+                  </div>
+                  <div className="h-px bg-gray-100" />
+                  <p className="text-xs text-gray-400">45 min</p>
+                </div>
+              ))}
+
+              {/* Empty placeholder */}
+              <button
+                onClick={onNewLesson}
+                className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center justify-center gap-3 text-gray-400 hover:border-[#039B96] hover:text-[#039B96] transition-colors min-h-[140px]"
+              >
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="text-sm font-medium">Nieuwe les</span>
+              </button>
+            </div>
+          </div>
+        </main>
       </div>
     </div>
   )
