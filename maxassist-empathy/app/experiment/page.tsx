@@ -55,7 +55,7 @@ const EDU_LEVELS = [
   { id: 'Anders', label: 'Anders', subLevels: [] },
 ]
 
-type AppStep = 'library' | 'details' | 'authoring' | 'completed'
+type AppStep = 'library' | 'details' | 'authoring' | 'post-library'
 type AuthoringTab = 'lesplan' | 'lesoverzicht' | 'les' | 'voorvertoning'
 type OutlinePhase = 'introductie' | 'instructie' | 'verwerking' | 'afronding'
 
@@ -602,26 +602,12 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
 }
 
 // Empathy variant of ChatPanel for LesTab.
-// Simon lives inside the Max card, directly below the message bubble.
+// Simon lives outside the Max card, as a standalone panel below the lesdoel card.
 function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: ReadingAnalysis | null }) {
   return (
     <div className="hidden lg:flex lg:flex-col lg:w-2/5 p-6 bg-white overflow-y-auto gap-4">
       <LesdoelCard lesdoel={lesdoel} />
-      <div className="border border-gray-200 rounded-lg bg-white flex flex-col overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white text-xs font-bold shrink-0">M</div>
-          <span className="text-sm font-medium">Max</span>
-        </div>
-        <div className="p-4">
-          <div className="flex gap-2 items-end">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
-            <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700 max-w-[85%]">
-              De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
-            </div>
-          </div>
-        </div>
-        <SimonPanel analysis={analysis} />
-      </div>
+      <SimonPanel analysis={analysis} />
     </div>
   )
 }
@@ -801,7 +787,7 @@ function ExperimentPage() {
       })
       if (!res.ok) throw new Error('failed')
       setSubmitted(true)
-      setShareModalOpen(false); setAppStep('library')
+      setShareModalOpen(false); setAppStep('post-library')
     } catch {
       setSubmitError('Er is iets misgegaan. Probeer het opnieuw.')
     } finally {
@@ -809,14 +795,8 @@ function ExperimentPage() {
     }
   }
 
-  if (appStep === 'library') return (
-    <LibraryScreen
-      submitted={submitted}
-      onNewLesson={() => { setAppStep('details'); setSubmitted(false) }}
-    />
-  )
-
-  if (appStep === 'completed') return <CompletionScreen />
+  if (appStep === 'library') return <LibraryPage onStart={() => { setAppStep('details'); setSubmitted(false) }} />
+  if (appStep === 'post-library') return <PostLibraryPage lesTitle={onderwerp || 'Mijn les'} />
 
   const activeLesdoel   = lesdoel || LESSON_LESDOEL
   const detailsComplete = isDetailsValid
@@ -1908,103 +1888,141 @@ function ShareModal({ tab, setTab, onClose, onDeelMetCollega, onLesOpSlot, submi
 }
 
 // ─── Library Screen ───────────────────────────────────────────────────────────
-function LibraryScreen({ submitted, onNewLesson }: { submitted: boolean; onNewLesson: () => void }) {
-  const exampleLessons = [
-    { title: 'Breuken optellen en aftrekken', subject: 'Wiskunde', level: 'Basisonderwijs groep 7', date: '12 mrt 2025' },
-    { title: 'De Tweede Wereldoorlog: oorzaken en gevolgen', subject: 'Geschiedenis', level: 'VMBO-T', date: '5 apr 2025' },
-    { title: 'Fotosynthese en celademhaling', subject: 'Biologie', level: 'HAVO 2', date: '18 apr 2025' },
-  ]
+// ─── Library Page ──────────────────────────────────────────────────────────────
+const DUMMY_LESSONS = [
+  { id: 'dummy-1', title: 'Fotosynthese en plantengroei', badge: 'Gepubliceerd', badgeColor: 'bg-[#F71E63]' },
+  { id: 'dummy-2', title: 'Klimaatverandering en duurzaamheid', badge: 'Gepubliceerd', badgeColor: 'bg-[#F71E63]' },
+]
 
+function LesCardBg({ seed }: { seed: number }) {
+  const colors = [
+    ['#fde68a', '#fca5a5', '#86efac'],
+    ['#a5f3fc', '#c4b5fd', '#fdba74'],
+    ['#bbf7d0', '#fde68a', '#c7d2fe'],
+  ]
+  const palette = colors[seed % colors.length]
+  return (
+    <svg viewBox="0 0 320 160" className="absolute inset-0 w-full h-full" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+      <rect width="320" height="160" fill={palette[0]} opacity="0.4" />
+      <path d={`M${40 + seed * 30} 0 Q${80 + seed * 20} 80 ${160 + seed * 10} 160`} stroke={palette[1]} strokeWidth="18" fill="none" opacity="0.5" />
+      <path d={`M${200 - seed * 15} 0 Q${260 - seed * 10} 60 ${280 + seed * 5} 160`} stroke={palette[2]} strokeWidth="10" fill="none" opacity="0.4" />
+      <circle cx={`${90 + seed * 40}`} cy={`${60 + seed * 10}`} r="28" fill={palette[1]} opacity="0.2" />
+      <circle cx={`${200 + seed * 20}`} cy={`${100 - seed * 8}`} r="18" fill={palette[2]} opacity="0.25" />
+      {[...Array(6)].map((_, i) => (
+        <line key={i} x1={i * 55 + seed * 3} y1="0" x2={i * 55 - 20 + seed * 3} y2="160"
+          stroke={palette[i % 3]} strokeWidth="1.5" opacity="0.18" />
+      ))}
+    </svg>
+  )
+}
+
+function LesCard({ title, badge, badgeColor, index, onClick, disabled }: {
+  title: string; badge: string; badgeColor: string; index: number; onClick?: () => void; disabled?: boolean
+}) {
+  const [showTip, setShowTip] = React.useState(false)
+  const handleClick = () => {
+    if (disabled) { setShowTip(true); setTimeout(() => setShowTip(false), 2500); return }
+    onClick?.()
+  }
+  return (
+    <div className="relative">
+      <button type="button" onClick={handleClick}
+        className={`relative w-full rounded-xl overflow-hidden border border-gray-200 bg-white shadow-sm transition-all text-left group flex flex-col ${disabled ? 'cursor-default' : 'hover:shadow-md hover:-translate-y-0.5'}`}
+        style={{ height: 200 }}>
+        <div className="relative overflow-hidden bg-gray-50 flex-none" style={{ height: 130 }}>
+          <LesCardBg seed={index} />
+          <span className={`absolute top-2.5 right-2.5 ${badgeColor} text-white text-[10px] font-bold px-2.5 py-1 rounded-full z-10`}>{badge}</span>
+          <div className="absolute bottom-2 right-2 flex items-center gap-0.5 z-10">
+            <div className="w-7 h-7 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center border border-gray-200 shadow-sm">
+              <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+            </div>
+          </div>
+        </div>
+        <div className="px-3 flex-1 flex items-center" style={{ height: 70 }}>
+          <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{title}</p>
+        </div>
+      </button>
+      {showTip && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 rounded-xl pointer-events-none">
+          <div className="bg-gray-900/90 text-white text-xs rounded-lg px-3 py-2 text-center max-w-[160px] shadow-lg">
+            Kan niet worden geladen in dit experiment
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LibraryPage({ onStart }: { onStart: () => void }) {
+  const [activeTab, setActiveTab] = React.useState<'mijn' | 'gedeeld_door' | 'met_mij'>('mijn')
   return (
     <div className="min-h-screen bg-[#FAFBFD]" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div className="flex h-screen overflow-hidden">
-        {/* Sidebar */}
-        <aside className="hidden md:flex flex-col w-16 bg-white border-r border-gray-100 pt-5 items-center shrink-0">
+        <aside className="hidden md:flex flex-col w-16 bg-white border-r border-gray-100 pt-5 items-center gap-6 shrink-0">
           <div className="w-10 h-10 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white font-bold text-sm">M</div>
+          <button type="button" onClick={onStart} className="flex flex-col items-center gap-1 mt-2 group">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors cursor-pointer">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            </div>
+            <span className="text-[9px] text-gray-400 text-center leading-tight">Maak les aan</span>
+          </button>
+          <div className="flex flex-col items-center gap-1">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[#039B96]/10 text-[#039B96]">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+            </div>
+            <span className="text-[9px] text-[#039B96] font-medium text-center leading-tight">Bibliotheek</span>
+          </div>
         </aside>
-
-        <main className="flex-1 overflow-y-auto p-6 md:p-10">
-          <div className="max-w-4xl mx-auto">
-
-            {/* Header */}
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Lessenbibliotheek</h1>
-                <p className="text-sm text-gray-500 mt-1">Overzicht van al je gemaakte lessen</p>
-              </div>
-              <button
-                onClick={onNewLesson}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#039B96] text-white text-sm font-semibold rounded-lg hover:bg-[#027a76] transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                Nieuwe les maken
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-bold text-gray-900">Bibliotheek</h1>
+              <button type="button" onClick={onStart}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:scale-[1.03] active:scale-[0.98]"
+                style={{ background: 'linear-gradient(135deg, #E13AA1 0%, #FF6633 100%)' }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                Maak les aan
               </button>
             </div>
-
-            {/* Completion notice */}
-            {submitted && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-6 flex items-start gap-3">
-                <svg className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <div>
-                  <p className="text-sm font-semibold text-emerald-900">Les succesvol gedeeld!</p>
-                  <p className="text-sm text-emerald-700 mt-0.5">Ga nu terug naar Qualtrics om de vragenlijst af te ronden.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Lesson cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-              {/* Newly created lesson card (only shown after submission) */}
-              {submitted && (
-                <div className="bg-white border-2 border-[#039B96] rounded-xl p-5 flex flex-col gap-3 shadow-sm">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-[#039B96] uppercase tracking-wide mb-1">Zojuist gemaakt</p>
-                      <h3 className="text-base font-semibold text-gray-900 leading-snug">Formatieve vs. Summatieve evaluatie</h3>
-                    </div>
-                    <span className="ml-2 shrink-0 text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">Gedeeld</span>
-                  </div>
-                  <div className="text-xs text-gray-500 space-y-0.5">
-                    <p>MBO Niveau 4</p>
-                    <p>{new Date().toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-                  </div>
-                  <div className="h-px bg-gray-100" />
-                  <p className="text-xs text-gray-400">60 min · 4 fasen</p>
-                </div>
-              )}
-
-              {/* Example lessons */}
-              {exampleLessons.map((les, i) => (
-                <div key={i} className="bg-white border border-gray-200 rounded-xl p-5 flex flex-col gap-3 hover:border-gray-300 transition-colors cursor-default">
-                  <div className="flex items-start justify-between">
-                    <h3 className="text-base font-semibold text-gray-900 leading-snug flex-1 min-w-0 pr-2">{les.title}</h3>
-                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">Concept</span>
-                  </div>
-                  <div className="text-xs text-gray-500 space-y-0.5">
-                    <p>{les.subject} · {les.level}</p>
-                    <p>{les.date}</p>
-                  </div>
-                  <div className="h-px bg-gray-100" />
-                  <p className="text-xs text-gray-400">45 min</p>
-                </div>
+            <div className="flex gap-1 mb-6 border-b border-gray-200">
+              {([['mijn', 'Mijn lessen'], ['gedeeld_door', 'Gedeeld door mij'], ['met_mij', 'Met mij gedeeld']] as const).map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setActiveTab(id)}
+                  className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${activeTab === id ? 'border-[#039B96] text-[#039B96]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                  {label}
+                </button>
               ))}
-
-              {/* Empty placeholder */}
-              <button
-                onClick={onNewLesson}
-                className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center justify-center gap-3 text-gray-400 hover:border-[#039B96] hover:text-[#039B96] transition-colors min-h-[140px]"
-              >
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-                </svg>
-                <span className="text-sm font-medium">Nieuwe les</span>
-              </button>
             </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {activeTab === 'mijn' && (
+                <>
+                  <button type="button" onClick={onStart}
+                    className="relative rounded-xl overflow-hidden border-2 border-dashed border-[#E13AA1]/50 bg-white hover:border-[#E13AA1] hover:bg-[#FFF0F7] transition-all group text-left shadow-sm hover:shadow-md hover:-translate-y-0.5"
+                    style={{ height: 200 }}>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #E13AA1 0%, #FF6633 100%)' }}>
+                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-bold text-gray-800">Nieuwe les maken</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Klik om te beginnen</p>
+                      </div>
+                    </div>
+                  </button>
+                  {DUMMY_LESSONS.map((lesson, i) => (
+                    <LesCard key={lesson.id} title={lesson.title} badge={lesson.badge} badgeColor={lesson.badgeColor} index={i + 1} disabled />
+                  ))}
+                </>
+              )}
+              {activeTab === 'gedeeld_door' && (
+                <LesCard title={DUMMY_LESSONS[0].title} badge={DUMMY_LESSONS[0].badge} badgeColor={DUMMY_LESSONS[0].badgeColor} index={1} disabled />
+              )}
+              {activeTab === 'met_mij' && (
+                <LesCard title={DUMMY_LESSONS[1].title} badge={DUMMY_LESSONS[1].badge} badgeColor={DUMMY_LESSONS[1].badgeColor} index={2} disabled />
+              )}
+            </div>
+            <p className="mt-8 text-xs text-gray-400 text-center">
+              Bestaande lessen kunnen niet worden geopend in dit experiment. Klik op &ldquo;Maak les aan&rdquo; om een nieuwe les te maken.
+            </p>
           </div>
         </main>
       </div>
@@ -2012,22 +2030,97 @@ function LibraryScreen({ submitted, onNewLesson }: { submitted: boolean; onNewLe
   )
 }
 
-// ─── Completion Screen ─────────────────────────────────────────────────────────
-function CompletionScreen() {
+// ─── Post-Library Page (after sharing) ────────────────────────────────────────
+function PostLibraryPage({ lesTitle }: { lesTitle: string }) {
+  const [activeTab, setActiveTab] = React.useState<'mijn' | 'gedeeld_door' | 'met_mij'>('mijn')
   return (
-    <div className="min-h-screen bg-[#FAFBFD] flex items-center justify-center p-6">
-      <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-10 text-center">
-        <div className="w-16 h-16 bg-[#039B96]/10 rounded-full flex items-center justify-center mx-auto mb-6">
-          <svg className="w-8 h-8 text-[#039B96]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">Bedankt voor je deelname!</h1>
-        <p className="text-gray-600 mb-6">Je hebt de les succesvol gedeeld. Ga nu terug naar Qualtrics om de vragenlijst af te ronden.</p>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <p className="text-sm font-semibold text-amber-900 mb-1">📋 Volgende stap</p>
-          <p className="text-sm text-amber-700">Keer terug naar het Qualtrics-tabblad in je browser om de evaluatie in te vullen.</p>
-        </div>
+    <div className="min-h-screen bg-[#FAFBFD]" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div className="flex h-screen overflow-hidden">
+        <aside className="hidden md:flex flex-col w-16 bg-white border-r border-gray-100 pt-5 items-center gap-6 shrink-0">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] flex items-center justify-center text-white font-bold text-sm">M</div>
+          <div className="flex flex-col items-center gap-1 mt-2">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center text-gray-400">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            </div>
+            <span className="text-[9px] text-gray-400 text-center leading-tight">Maak les aan</span>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[#039B96]/10 text-[#039B96]">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+            </div>
+            <span className="text-[9px] text-[#039B96] font-medium text-center leading-tight">Bibliotheek</span>
+          </div>
+        </aside>
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 flex items-start gap-3">
+              <span className="text-xl shrink-0 mt-0.5">📋</span>
+              <div>
+                <p className="text-sm font-bold text-amber-900">Je les is opgeslagen — bedankt!</p>
+                <p className="text-sm text-amber-700 mt-0.5">Ga nu terug naar het <strong>Qualtrics-tabblad</strong> in je browser om de vragenlijst af te ronden.</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-bold text-gray-900">Bibliotheek</h1>
+              <button type="button" disabled
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold text-white shadow-md opacity-50 cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg, #E13AA1 0%, #FF6633 100%)' }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
+                Maak les aan
+              </button>
+            </div>
+            <div className="flex gap-1 mb-6 border-b border-gray-200">
+              {([['mijn', 'Mijn lessen'], ['gedeeld_door', 'Gedeeld door mij'], ['met_mij', 'Met mij gedeeld']] as const).map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setActiveTab(id)}
+                  className={`px-4 py-2.5 text-sm font-medium transition-all border-b-2 -mb-px ${activeTab === id ? 'border-[#039B96] text-[#039B96]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(() => {
+              const MyNewLesson = () => (
+                <div className="relative rounded-xl overflow-hidden border-2 border-[#039B96]/40 bg-white shadow-sm cursor-default flex flex-col" style={{ height: 200 }}>
+                  <div className="relative overflow-hidden bg-gray-50 flex-none" style={{ height: 130 }}>
+                    <LesCardBg seed={0} />
+                    <span className="absolute top-2.5 right-2.5 bg-[#F71E63] text-white text-[10px] font-bold px-2.5 py-1 rounded-full z-10">Gepubliceerd</span>
+                    <div className="absolute bottom-2 right-2 flex items-center gap-0.5 z-10">
+                      <div className="w-7 h-7 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center border border-gray-200 shadow-sm">
+                        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="px-3 flex-1 flex items-center" style={{ height: 70 }}>
+                    <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{lesTitle}</p>
+                  </div>
+                </div>
+              )
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {activeTab === 'mijn' && (
+                    <>
+                      <MyNewLesson />
+                      {DUMMY_LESSONS.map((lesson, i) => (
+                        <LesCard key={lesson.id} title={lesson.title} badge={lesson.badge} badgeColor={lesson.badgeColor} index={i + 1} disabled />
+                      ))}
+                    </>
+                  )}
+                  {activeTab === 'gedeeld_door' && (
+                    <>
+                      <MyNewLesson />
+                      <LesCard title={DUMMY_LESSONS[0].title} badge={DUMMY_LESSONS[0].badge} badgeColor={DUMMY_LESSONS[0].badgeColor} index={1} disabled />
+                    </>
+                  )}
+                  {activeTab === 'met_mij' && (
+                    <LesCard title={DUMMY_LESSONS[1].title} badge={DUMMY_LESSONS[1].badge} badgeColor={DUMMY_LESSONS[1].badgeColor} index={2} disabled />
+                  )}
+                </div>
+              )
+            })()}
+            <p className="mt-8 text-xs text-gray-400 text-center">
+              Lessen kunnen niet worden geopend in dit experiment. Keer terug naar Qualtrics om verder te gaan.
+            </p>
+          </div>
+        </main>
       </div>
     </div>
   )
