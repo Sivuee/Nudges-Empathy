@@ -742,6 +742,11 @@ function ExperimentPage() {
   const wordCount      = onderwerp.trim().split(/\s+/).filter(Boolean).length
   const isDetailsValid = !!educatieNiveau && wordCount >= 3 && lesdoel.trim().length > 0
 
+  /** Called by MaxSidebarChat for every completed prompt/response pair */
+  const handleAiInteraction = React.useCallback((interaction: Omit<AiInteraction, 'index'>) => {
+    setAiInteractions(prev => [...prev, { ...interaction, index: prev.length + 1 }])
+  }, [])
+
   const handleSaveDetails = () => {
     if (!isDetailsValid) return
     setTopTab('authoring')
@@ -766,6 +771,7 @@ function ExperimentPage() {
     await new Promise(resolve => setTimeout(resolve, 0))
     const plainText = stripHtml(lesText)
     const lev = levenshtein(plainText, EXPERIMENT_TEXT)
+    const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
     try {
       const res = await fetch('https://formspree.io/f/mqedwepd', {
@@ -779,6 +785,10 @@ function ExperimentPage() {
           errors_uncorrected: uncorrected.join(','),
           errors_undetectable: undetectable.join(','),
           final_text: plainText,
+          lesonderwerp: onderwerp,
+          doelgroep: doelgroepStr,
+          lesdoel_text: lesdoel,
+          lesduur_min:  lesduur ?? null,
           simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
           simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
           simon_read_score: readingAnalysis?.averageReadScore ?? 0,
@@ -1321,7 +1331,7 @@ function renderContent(text: string): React.ReactNode[] {
   return nodes
 }
 
-function EditorToolbar({ onFormat }: { onFormat: (tag: string) => void }) {
+function EditorToolbar({ onFormat, onOpenMaxPanel }: { onFormat: (tag: string) => void; onOpenMaxPanel: () => void }) {
   const TBtn = ({ label, icon, onClick, title }: {
     label?: string; icon?: React.ReactNode; onClick: () => void; title?: string
   }) => (
@@ -1507,7 +1517,7 @@ function TextBlock({ content, onUpdate, onManualInput, onOpenMaxPanel, editorRef
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
-      <EditorToolbar onFormat={handleFormat} />
+      <EditorToolbar onFormat={handleFormat} onOpenMaxPanel={onOpenMaxPanel} />
       <div className="p-5 bg-white">
         <div
           ref={editorRef}
