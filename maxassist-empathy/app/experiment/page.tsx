@@ -1608,7 +1608,7 @@ const PhaseCard = React.forwardRef<HTMLDivElement, {
   )
 })
 
-function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition,
+function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition, onLesTabEnter, onLesTabLeave,
   loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
   manualEditTexts, onManualInput, onPrev, onNext }: any) {
   useEffect(() => {
