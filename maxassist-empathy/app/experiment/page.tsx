@@ -711,6 +711,34 @@ function ExperimentPage() {
   const [participantId, setParticipantId]   = useState('unknown')
   const [condition, setCondition]           = useState('student')
 
+  // ── New experiment measurements ──────────────────────────────────────────
+  const [aiInteractions, setAiInteractions]   = useState<AiInteraction[]>([])
+  const [lesEditMs, setLesEditMs]             = useState(0)
+  const lesEditMsRef                          = React.useRef(0)   // always-current mirror for async reads
+  const lesEditStartRef                       = React.useRef<number | null>(null)
+  /** Call when entering the Les tab */
+  const handleLesTabEnter = React.useCallback(() => {
+    lesEditStartRef.current = Date.now()
+  }, [])
+
+/** Call when leaving the Les tab */
+  const handleLesTabLeave = React.useCallback(() => {
+    if (lesEditStartRef.current !== null) {
+      const elapsed = Date.now() - lesEditStartRef.current
+      lesEditMsRef.current += elapsed
+      setLesEditMs(lesEditMsRef.current)
+      lesEditStartRef.current = null
+    }
+  }, [])
+
+  /** Called by MaxSidebarChat for every completed prompt/response pair */
+  const handleAiInteraction = React.useCallback((interaction: Omit<AiInteraction, 'index'>) => {
+    setAiInteractions(prev => [...prev, { ...interaction, index: prev.length + 1 }])
+  }, [])
+
+  // Latest manual edit count reported by LesTab
+  const [manualEditCount, setManualEditCount] = useState(0)
+
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
     setParticipantId(p.get('pid') || 'unknown')
@@ -769,9 +797,11 @@ function ExperimentPage() {
   const handleDeelMetCollega = async () => {
     setSubmitting(true); setSubmitError(null)
     await new Promise(resolve => setTimeout(resolve, 0))
+    const additionalMs = lesEditStartRef.current !== null ? Date.now() - lesEditStartRef.current : 0
+    lesEditStartRef.current = null
+    const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
     const plainText = stripHtml(lesText)
     const lev = levenshtein(plainText, EXPERIMENT_TEXT)
-    const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
     try {
       const res = await fetch('https://formspree.io/f/mqedwepd', {
@@ -785,14 +815,19 @@ function ExperimentPage() {
           errors_uncorrected: uncorrected.join(','),
           errors_undetectable: undetectable.join(','),
           final_text: plainText,
+          submitted_at: new Date().toISOString(),
           lesonderwerp: onderwerp,
           doelgroep: doelgroepStr,
           lesdoel_text: lesdoel,
           lesduur_min:  lesduur ?? null,
+          les_edit_time_sec:  finalLesEditSec,
           simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
           simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
           simon_read_score: readingAnalysis?.averageReadScore ?? 0,
-          submitted_at: new Date().toISOString(),
+          ai_prompt_count:    aiInteractions.length,
+          ai_prompts:         aiInteractions.map(i => i.prompt).join(' | '),
+          ai_interactions:    JSON.stringify(aiInteractions),
+          manual_edit_count:  manualEditCount,
         }),
       })
       if (!res.ok) throw new Error('failed')
@@ -896,11 +931,14 @@ function ExperimentPage() {
                       phaseBlocks={phaseBlocks} setPhaseBlocks={setPhaseBlocks}
                       lessonOutline={lessonOutline} lesdoel={activeLesdoel} condition={condition}
                       loaded={lesLoaded} setLoaded={setLesLoaded}
+                      onLesTabEnter={handleLesTabEnter} onLesTabLeave={handleLesTabLeave}
+                      onAiInteraction={handleAiInteraction}
+                      onManualEditCount={setManualEditCount}
                       trackerMounted={trackerMounted} setTrackerMounted={setTrackerMounted}
                       readingAnalysis={readingAnalysis} onReadingAnalysis={stableSetAnalysis}
                       manualEditTexts={manualEditTexts} onManualInput={handleManualInput}
-                      onPrev={() => setActiveTab('lesoverzicht')}
-                      onNext={() => setActiveTab('voorvertoning')} />
+                      onPrev={() => { handleLesTabLeave(); setActiveTab('lesoverzicht') }}
+                      onNext={() => { handleLesTabLeave(); setActiveTab('voorvertoning') }} />
                   )}
                   {activeTab === 'voorvertoning' && (
                     <VoorvertoningTab lesText={lesText} lesdoel={activeLesdoel} condition={condition}
@@ -1582,6 +1620,12 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 20000); return () => clearTimeout(t) }
   }, [loaded, setLoaded])
 
+  // Timer: start when this tab mounts, stop when it unmounts
+  useEffect(() => {
+    onLesTabEnter?.()
+    return () => onLesTabLeave?.()
+  }, []) // eslint-disable-line
+
   useEffect(() => {
     if (condition === 'student' && loaded && !trackerMounted) {
       const raf = requestAnimationFrame(() => setTrackerMounted(true))
@@ -1597,6 +1641,15 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
   // activePhase: set when user clicks "Evalueer met Max" in a phase card
   const [activePhase, setActivePhase] = useState<OutlinePhase | null>(null)
+
+  // Manual edit counter — increments once per input event (1 character = 1 event)
+  const [manualEditCount, setManualEditCount] = useState(0)
+  const handleManualEdit = React.useCallback(() => setManualEditCount(n => n + 1), [])
+
+  // Report latest manual edit count to parent on every change
+  useEffect(() => {
+    onManualEditCount?.(manualEditCount)
+  }, [manualEditCount]) // eslint-disable-line
 
   // One stable ref per phase so MaxSidebarChat can read/write editor HTML directly
   const introRef      = React.useRef<HTMLDivElement>(null)
