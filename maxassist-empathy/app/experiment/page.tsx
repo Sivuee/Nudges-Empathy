@@ -770,11 +770,6 @@ function ExperimentPage() {
   const wordCount      = onderwerp.trim().split(/\s+/).filter(Boolean).length
   const isDetailsValid = !!educatieNiveau && wordCount >= 3 && lesdoel.trim().length > 0
 
-  /** Called by MaxSidebarChat for every completed prompt/response pair */
-  const handleAiInteraction = React.useCallback((interaction: Omit<AiInteraction, 'index'>) => {
-    setAiInteractions(prev => [...prev, { ...interaction, index: prev.length + 1 }])
-  }, [])
-
   const handleSaveDetails = () => {
     if (!isDetailsValid) return
     setTopTab('authoring')
