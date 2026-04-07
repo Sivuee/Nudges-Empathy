@@ -1341,6 +1341,18 @@ function EditorToolbar({ onFormat }: { onFormat: (tag: string) => void }) {
       <TBtn label="H2" title="Kop 2" onClick={() => onFormat('h2')} />
       <TBtn label="H3" title="Kop 3" onClick={() => onFormat('h3')} />
       <TBtn icon={ico('M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6')} title="Ongedaan maken" onClick={() => onFormat('undo')} />
+      <div className="flex-1" />
+      <button
+        type="button"
+        title="Vraag Max om feedback op deze tekst"
+        onClick={e => { e.preventDefault(); onOpenMaxPanel() }}
+        className="flex items-center gap-1.5 px-3 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] text-white text-xs font-semibold hover:opacity-90 transition-opacity shrink-0"
+      >
+        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+        </svg>
+        Evalueer met Max
+      </button>
     </div>
   )
 }
@@ -1516,19 +1528,6 @@ function TextBlock({ content, onUpdate, onManualInput, onOpenMaxPanel, editorRef
           ].join(' ')}
         />
       </div>
-      {onOpenMaxPanel && (
-        <div className="px-5 pb-4 flex justify-end">
-          <button
-            type="button"
-            onClick={onOpenMaxPanel}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ background: 'linear-gradient(135deg, #E13AA1 0%, #FF6633 100%)' }}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
-            Evalueer met Max
-          </button>
-        </div>
-      )}
     </div>
   )
 }
