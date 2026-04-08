@@ -1250,7 +1250,7 @@ function LesDetailsTab({ educatieNiveau, setEducatieNiveau, educatieSpecifiekNiv
             <div className="flex gap-2 items-end">
               <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
               <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700">
-                Welkom bij het experiment, dit is een MaxAssist variant om de flow van de applicatie te testen hierbij is je opdracht: Maak een les van <b>een uur</b> over <b>Formatieve vs Summatieve evaluatie</b> voor <b>MBO niveau 4.</b>
+                Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant om de flow van de applicatie te testen. Hierbij is je opdracht: Maak een les van <b>een uur</b> over <b>Formatieve vs Summatieve evaluatie</b> voor <b>MBO niveau 4.</b>
               </div>
             </div>
           </div>
@@ -1288,7 +1288,7 @@ function LesplanTab({ lesduur, setLesduur, verwerkingOpdracht, lesdoel, onNext }
           <Btn variant="default" onClick={onNext} disabled={!canNext}>Volgende <ChevRight /></Btn>
         </div>
       </div>
-      <ChatPanel lesdoel={lesdoel} message=" Welkom bij het experiment, dit is een MaxAssist variant om de flow van de applicatie te testen hierbij is je opdracht: Maak een les van een uur over Formatieve vs Summatieve evaluatie voor MBO niveau 4." />
+      <ChatPanel lesdoel={lesdoel} message="Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant om de flow van de applicatie te testen. Hierbij is je opdracht: Maak een les van een uur over Formatieve vs Summatieve evaluatie voor MBO niveau 4." />
     </div>
   )
 }
@@ -1304,7 +1304,7 @@ const PHASE_DESCS:  Record<OutlinePhase, string> = {
 
 function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText, setPhaseBlocks, lesdoel, loaded, setLoaded, onPrev, onNext }: any) {
   useEffect(() => {
-    if (!loaded) { const t = setTimeout(() => setLoaded(true), 15000); return () => clearTimeout(t) }
+    if (!loaded) { const t = setTimeout(() => setLoaded(true), 4000); return () => clearTimeout(t) }
   }, [loaded, setLoaded])
 
   const toggle = (phase: OutlinePhase) =>
@@ -1457,7 +1457,7 @@ function EditorToolbar({ onFormat, onOpenMaxPanel }: { onFormat: (tag: string) =
         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
         </svg>
-        Evalueer met Max
+        Geef feedback op Max
       </button>
     </div>
   )
@@ -1675,7 +1675,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
   loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
   manualEditTexts, onManualInput, onPrev, onNext }: any) {
   useEffect(() => {
-    if (!loaded) { const t = setTimeout(() => setLoaded(true), 20000); return () => clearTimeout(t) }
+    if (!loaded) { const t = setTimeout(() => setLoaded(true), 7000); return () => clearTimeout(t) }
   }, [loaded, setLoaded])
 
   // Timer: start when this tab mounts, stop when it unmounts
@@ -1697,7 +1697,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
     new Set(phases.filter(p => lessonOutline[p].active))
   )
 
-  // activePhase: set when user clicks "Evalueer met Max" in a phase card
+  // activePhase: set when user clicks "Geef feedback op Max" in a phase card
   const [activePhase, setActivePhase] = useState<OutlinePhase | null>(null)
 
   // Manual edit counter — increments once per input event (1 character = 1 event)
@@ -1964,10 +1964,6 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-4 py-2 border-b border-gray-100 shrink-0 flex items-start justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold text-gray-900">Heb je vragen of opmerkingen over de tekst?</p>
-          {phaseLabel && <p className="text-[11px] text-gray-400 mt-0.5">Actieve fase: {phaseLabel}</p>}
-        </div>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-0.5 shrink-0 mt-0.5">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1982,7 +1978,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
             <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700 max-w-[85%]">
               {phaseLabel
                 ? `Stel je vraag of geef je opmerking over de ${phaseLabel}-fase.`
-                : 'Druk op een Evalueer knop om vragen en opmerkingen te maken over de les.'}
+                : 'Ik kan helpen bij het evalueren van een tekstgedeelte, door vragen te beantwoorden of de tekst aan te passen op basis van je feedback. Klik op "Geef feedback op Max" om te beginnen!'}
             </div>
           </div>
         )}
@@ -2025,12 +2021,6 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
       )}
 
       <div className="px-4 py-3 border-t border-gray-100 shrink-0">
-        <p className="text-[11px] text-gray-400 mb-1.5">Stel je vraag / Geef je opmerking / Lever je kritiek</p>
-        {!activePhase && (
-          <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
-            Klik op <strong>Evalueer met Max</strong> in een tekstblok om te beginnen.
-          </p>
-        )}
         <textarea
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -2045,7 +2035,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
           disabled={loading || !input.trim() || !activePhase}
           className="mt-2 w-full py-2 rounded-xl bg-gradient-to-r from-[#E13AA1] to-[#F63] text-white text-xs font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Evalueer met Max
+          Geef feedback op Max
         </button>
       </div>
     </div>
