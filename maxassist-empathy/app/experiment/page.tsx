@@ -1250,7 +1250,7 @@ function LesDetailsTab({ educatieNiveau, setEducatieNiveau, educatieSpecifiekNiv
             <div className="flex gap-2 items-end">
               <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
               <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700">
-                Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant om de flow van de applicatie te testen. Hierbij is je opdracht: Maak een les van <b>een uur</b> over <b>Formatieve vs Summatieve evaluatie</b> voor <b>MBO niveau 4.</b>
+                Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant is om een nieuwe feature te testen. Hierbij is je opdracht: Maak een les van <b>een uur</b> over <b>Formatieve vs Summatieve evaluatie</b> voor <b>MBO niveau 4.</b>
               </div>
             </div>
           </div>
@@ -1288,7 +1288,7 @@ function LesplanTab({ lesduur, setLesduur, verwerkingOpdracht, lesdoel, onNext }
           <Btn variant="default" onClick={onNext} disabled={!canNext}>Volgende <ChevRight /></Btn>
         </div>
       </div>
-      <ChatPanel lesdoel={lesdoel} message="Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant om de flow van de applicatie te testen. Hierbij is je opdracht: Maak een les van een uur over Formatieve vs Summatieve evaluatie voor MBO niveau 4." />
+      <ChatPanel lesdoel={lesdoel} message="Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant is om een nieuwe feature te testen. Hierbij is je opdracht: Maak een les van een uur over Formatieve vs Summatieve evaluatie voor MBO niveau 4." />
     </div>
   )
 }
