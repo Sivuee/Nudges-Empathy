@@ -746,9 +746,38 @@ function ExperimentPage() {
     setCondition('student')
   }, [])
 
-  // Reading analysis state — lifted here so it survives tab switches
+  // Reading analysis state — lifted here so it survives tab switches.
+  // stableSetAnalysis merges incoming data by keeping the highest read score
+  // seen so far per phase, so navigating away (Les → Lesoverzicht → Les)
+  // never resets accumulated reading time back to zero.
   const [readingAnalysis, setReadingAnalysis] = useState<ReadingAnalysis | null>(null)
-  const stableSetAnalysis = useCallback((a: ReadingAnalysis) => setReadingAnalysis(a), [])
+  const stableSetAnalysis = useCallback((incoming: ReadingAnalysis) => {
+    setReadingAnalysis(prev => {
+      if (!prev) return incoming
+
+      const mergedSections: SectionReading[] = incoming.sections.map(ns => {
+        const ps = prev.sections.find(s => s.sectionId === ns.sectionId)
+        const readScore = ps ? Math.max(ps.readScore, ns.readScore) : ns.readScore
+        return { ...ns, readScore, readTier: readTierFromScore(readScore) }
+      })
+
+      const averageReadScore = Math.round(
+        mergedSections.reduce((s, r) => s + r.readScore, 0) / mergedSections.length
+      )
+      const overallReadTier   = readTierFromScore(averageReadScore)
+      const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
+        ? 'Menselijk' : 'AIGegenereerd'
+      const weakestReadLabels = [...mergedSections]
+        .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
+      const weakestEditLabels = [...mergedSections]
+        .sort((a, b) => {
+          if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
+          return a.readScore - b.readScore
+        }).slice(0, 2).map(s => s.label)
+
+      return { sections: mergedSections, averageReadScore, overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels }
+    })
+  }, [])
   // Tracker mounted flag — wait one frame after LesTab mounts so phase cards are in DOM
   const [trackerMounted, setTrackerMounted] = useState(false)
 
