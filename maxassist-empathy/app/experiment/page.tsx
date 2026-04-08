@@ -59,6 +59,15 @@ type AppStep = 'library' | 'details' | 'authoring' | 'post-library'
 type AuthoringTab = 'lesplan' | 'lesoverzicht' | 'les' | 'voorvertoning'
 type OutlinePhase = 'introductie' | 'instructie' | 'verwerking' | 'afronding'
 
+interface AiInteraction {
+  index:       number
+  phase:       string
+  prompt:      string
+  response:    string
+  changed:     boolean
+  timestampMs: number
+}
+
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 function Btn({ children, onClick, disabled = false, variant = 'default', className = '' }: {
@@ -746,9 +755,40 @@ function ExperimentPage() {
     setCondition('student')
   }, [])
 
-  // Reading analysis state — lifted here so it survives tab switches
+  // Reading analysis state — lifted here so it survives tab switches.
+  // stableSetAnalysis merges incoming data by keeping the highest read score
+  // seen so far per phase, so scores never reset to 0 when the tracker remounts
+  // after navigating away from the Les tab and back.
   const [readingAnalysis, setReadingAnalysis] = useState<ReadingAnalysis | null>(null)
-  const stableSetAnalysis = useCallback((a: ReadingAnalysis) => setReadingAnalysis(a), [])
+  const stableSetAnalysis = useCallback((incoming: ReadingAnalysis) => {
+    setReadingAnalysis(prev => {
+      if (!prev) return incoming
+
+      // Per-section: keep the best read score seen so far; always take the
+      // latest edit tier (user may have typed more since the last snapshot).
+      const mergedSections: SectionReading[] = incoming.sections.map(ns => {
+        const ps = prev.sections.find(s => s.sectionId === ns.sectionId)
+        const readScore = ps ? Math.max(ps.readScore, ns.readScore) : ns.readScore
+        return { ...ns, readScore, readTier: readTierFromScore(readScore) }
+      })
+
+      const averageReadScore = Math.round(
+        mergedSections.reduce((s, r) => s + r.readScore, 0) / mergedSections.length
+      )
+      const overallReadTier = readTierFromScore(averageReadScore)
+      const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
+        ? 'Menselijk' : 'AIGegenereerd'
+      const weakestReadLabels = [...mergedSections]
+        .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
+      const weakestEditLabels = [...mergedSections]
+        .sort((a, b) => {
+          if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
+          return a.readScore - b.readScore
+        }).slice(0, 2).map(s => s.label)
+
+      return { sections: mergedSections, averageReadScore, overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels }
+    })
+  }, [])
   // Tracker mounted flag — wait one frame after LesTab mounts so phase cards are in DOM
   const [trackerMounted, setTrackerMounted] = useState(false)
 
@@ -816,13 +856,32 @@ function ExperimentPage() {
           lesdoel_text: lesdoel,
           lesduur_min:  lesduur ?? null,
           les_edit_time_sec:  finalLesEditSec,
-          simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
-          simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
-          simon_read_score: readingAnalysis?.averageReadScore ?? 0,
-          ai_prompt_count:    aiInteractions.length,
-          ai_prompts:         aiInteractions.map(i => i.prompt).join(' | '),
-          ai_interactions:    JSON.stringify(aiInteractions),
-          manual_edit_count:  manualEditCount,
+          simon_read_tier:   readingAnalysis?.overallReadTier  ?? 'geen data',
+          simon_edit_tier:   readingAnalysis?.overallEditTier  ?? 'geen data',
+          simon_read_score:  readingAnalysis?.averageReadScore ?? 0,
+          // Numeric edit ratio: average Levenshtein-distance / original-length across all phases (0–1+)
+          simon_edit_ratio: (() => {
+            if (!readingAnalysis) return 0
+            const ratios = readingAnalysis.sections.map(s => {
+              const outlineKey = PHASE_ID_TO_OUTLINE[s.sectionId] ?? ''
+              const manual = manualEditTexts[outlineKey]
+              const current = (manual !== null && manual !== undefined)
+                ? stripHtmlForEdit(manual as string)
+                : (phaseBlocks[outlineKey] ?? []).join('\n')
+              const original = ORIGINAL_PHASE_TEXT[outlineKey] ?? ''
+              if (!original) return 0
+              const dist = simpleLevenshtein(
+                current.replace(/\s+/g, ' ').trim(),
+                original.replace(/\s+/g, ' ').trim()
+              )
+              return Math.round((dist / Math.max(1, original.length)) * 1000) / 1000
+            })
+            return Math.round((ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length)) * 1000) / 1000
+          })(),
+          ai_prompt_count:   aiInteractions.length,
+          ai_prompts:        aiInteractions.map(i => i.prompt).join(' | '),
+          ai_interactions:   JSON.stringify(aiInteractions),
+          manual_edit_count: manualEditCount,
         }),
       })
       if (!res.ok) throw new Error('failed')
@@ -1752,12 +1811,13 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
 // ─── Cohere-powered Max chat ──────────────────────────────────────────────────
 function MaxSidebarChat({
-  activePhase, getPhaseHtml, onApplyChange, onClose,
+  activePhase, getPhaseHtml, onApplyChange, onClose, onAiInteraction,
 }: {
   activePhase: OutlinePhase | null
   getPhaseHtml: (phase: OutlinePhase) => string
   onApplyChange: (phase: OutlinePhase, newHtml: string) => void
   onClose: () => void
+  onAiInteraction?: (interaction: Omit<AiInteraction, 'index'>) => void
 }) {
   const [input, setInput]               = useState('')
   const [messages, setMessages]         = useState<{ role: 'user' | 'assistant'; text: string }[]>([])
@@ -1868,11 +1928,26 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
         setPreviousHtml(currentHtml)
         setPreviousPhase(activePhase)
         onApplyChange(activePhase, newHtml)
-        setMessages(prev => [...prev, { role: 'assistant', text: `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.\n\n${summary}` }])
+        const assistantText = `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.\n\n${summary}`
+        setMessages(prev => [...prev, { role: 'assistant', text: assistantText }])
+        onAiInteraction?.({
+          phase:       activePhase,
+          prompt:      q,
+          response:    assistantText,
+          changed:     true,
+          timestampMs: Date.now(),
+        })
       } else {
         const answerMatch = raw.match(/ANSWER:\s*([\s\S]*?)$/i)
         const answer      = answerMatch?.[1]?.trim() ?? raw.trim()
         setMessages(prev => [...prev, { role: 'assistant', text: answer }])
+        onAiInteraction?.({
+          phase:       activePhase,
+          prompt:      q,
+          response:    answer,
+          changed:     false,
+          timestampMs: Date.now(),
+        })
       }
     } catch (err: any) {
       setMessages(prev => [...prev, {
