@@ -59,6 +59,14 @@ type AppStep = 'library' | 'details' | 'authoring' | 'post-library'
 type AuthoringTab = 'lesplan' | 'lesoverzicht' | 'les' | 'voorvertoning'
 type OutlinePhase = 'introductie' | 'instructie' | 'verwerking' | 'afronding'
 
+interface AiInteraction {
+  index:    number
+  prompt:   string
+  response: string
+  phase:    string
+  wasChange: boolean
+}
+
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 function Btn({ children, onClick, disabled = false, variant = 'default', className = '' }: {
@@ -827,6 +835,25 @@ function ExperimentPage() {
     const plainText = stripHtml(lesText)
     const lev = levenshtein(plainText, EXPERIMENT_TEXT)
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
+
+    // Compute per-phase edit ratios using the same logic as editTierForPhase
+    const phaseEditRatios: Record<string, number> = {}
+    const phases: OutlinePhase[] = ['introductie', 'instructie', 'verwerking', 'afronding']
+    for (const phase of phases) {
+      const original = ORIGINAL_PHASE_TEXT[phase] ?? ''
+      const outlineKey = phase
+      const currentText = manualEditTexts[outlineKey] !== null && manualEditTexts[outlineKey] !== undefined
+        ? stripHtmlForEdit(manualEditTexts[outlineKey] as string)
+        : (phaseBlocks[phase] ?? []).join('\n')
+      const dist = simpleLevenshtein(
+        currentText.replace(/\s+/g, ' ').trim(),
+        original.replace(/\s+/g, ' ').trim()
+      )
+      phaseEditRatios[phase] = original.length > 0 ? Math.round((dist / original.length) * 1000) / 1000 : 0
+    }
+    const overallEditRatio = Math.round(
+      phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
+    ) / 1000
     try {
       const res = await fetch('https://formspree.io/f/mqedwepd', {
         method: 'POST',
@@ -848,9 +875,16 @@ function ExperimentPage() {
           simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
           simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
           simon_read_score: readingAnalysis?.averageReadScore ?? 0,
+          // AI interaction tracking
           ai_prompt_count:    aiInteractions.length,
           ai_prompts:         aiInteractions.map(i => i.prompt).join(' | '),
           ai_interactions:    JSON.stringify(aiInteractions),
+          // Edit ratio per phase (0 = unchanged, 1 = fully rewritten)
+          edit_ratio_introductie: phaseEditRatios['introductie'],
+          edit_ratio_instructie:  phaseEditRatios['instructie'],
+          edit_ratio_verwerking:  phaseEditRatios['verwerking'],
+          edit_ratio_afronding:   phaseEditRatios['afronding'],
+          edit_ratio_overall:     overallEditRatio,
           manual_edit_count:  manualEditCount,
         }),
       })
@@ -1781,12 +1815,13 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
 // ─── Cohere-powered Max chat ──────────────────────────────────────────────────
 function MaxSidebarChat({
-  activePhase, getPhaseHtml, onApplyChange, onClose,
+  activePhase, getPhaseHtml, onApplyChange, onClose, onAiInteraction,
 }: {
   activePhase: OutlinePhase | null
   getPhaseHtml: (phase: OutlinePhase) => string
   onApplyChange: (phase: OutlinePhase, newHtml: string) => void
   onClose: () => void
+  onAiInteraction?: (interaction: Omit<AiInteraction, 'index'>) => void
 }) {
   const [input, setInput]               = useState('')
   const [messages, setMessages]         = useState<{ role: 'user' | 'assistant'; text: string }[]>([])
@@ -1897,11 +1932,14 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
         setPreviousHtml(currentHtml)
         setPreviousPhase(activePhase)
         onApplyChange(activePhase, newHtml)
-        setMessages(prev => [...prev, { role: 'assistant', text: `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.\n\n${summary}` }])
+        const assistantMsg = `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.\n\n${summary}`
+        setMessages(prev => [...prev, { role: 'assistant', text: assistantMsg }])
+        onAiInteraction?.({ prompt: q, response: assistantMsg, phase: activePhase, wasChange: true })
       } else {
         const answerMatch = raw.match(/ANSWER:\s*([\s\S]*?)$/i)
         const answer      = answerMatch?.[1]?.trim() ?? raw.trim()
         setMessages(prev => [...prev, { role: 'assistant', text: answer }])
+        onAiInteraction?.({ prompt: q, response: answer, phase: activePhase ?? 'unknown', wasChange: false })
       }
     } catch (err: any) {
       setMessages(prev => [...prev, {
