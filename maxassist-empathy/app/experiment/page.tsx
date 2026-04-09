@@ -1897,12 +1897,12 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'command-r-plus-08-2024',
+          model: 'command-r-08-2024',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Huidige tekst van de fase "${PHASE_LABEL[activePhase]}":\n\n${plainText}\n\nVraag/opmerking van de gebruiker:\n${q}` },
           ],
-          max_tokens: 1024,
+          max_tokens: 1500,
         }),
       })
 
