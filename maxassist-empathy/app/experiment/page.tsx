@@ -277,27 +277,27 @@ const PHASE_ID_TO_OUTLINE: Record<string, string> = {
 }
 
 // ─── Reading tier — three levels ────────────────────────────────────────────
-type ReadingTier = 'Verwarrend' | 'Duidelijk' | 'Geweldig'
+type ReadingTier = 'Slordig' | 'Oppervlakkig' | 'Duidelijk'
 
 // ─── Edit tier — binary: either enough edits or not ─────────────────────────
 type EditTier = 'AIGegenereerd' | 'Menselijk'
 
 // Colour for the reading tier label in the verdict sentence
 const READ_TIER_COLOUR: Record<ReadingTier, string> = {
-  Verwarrend: 'text-red-600',
-  Duidelijk:  'text-amber-500',
-  // Geweldig + Menselijk → green; Geweldig + AIGegenereerd → amber (see SimonPanel)
-  Geweldig:   'text-emerald-600',
+  Slordig: 'text-red-600',
+  Oppervlakkig:  'text-amber-500',
+  // Duidelijk + Menselijk → green; Duidelijk + AIGegenereerd → amber (see SimonPanel)
+  Duidelijk:   'text-emerald-600',
 }
 
 // ─── Per-phase minimum reading times ─────────────────────────────────────────
-// minMs      = hard gate: below this the block stays Verwarrend.
-// geweldigMs = time at which the block reaches full (80 pt) time score.
-const PHASE_READ_CONFIG: Record<string, { minMs: number; geweldigMs: number }> = {
-  'phase-introductie': { minMs:  8_000, geweldigMs: 30_000 },
-  'phase-instructie':  { minMs: 10_000, geweldigMs: 40_000 },
-  'phase-verwerking':  { minMs:  8_000, geweldigMs: 30_000 },
-  'phase-afronding':   { minMs:  6_000, geweldigMs: 25_000 },
+// minMs      = hard gate: below this the block stays Slordig.
+// DuidelijkMs = time at which the block reaches full (80 pt) time score.
+const PHASE_READ_CONFIG: Record<string, { minMs: number; DuidelijkMs: number }> = {
+  'phase-introductie': { minMs:  80_000, DuidelijkMs: 170_000 },
+  'phase-instructie':  { minMs: 40_000, DuidelijkMs: 100_000 },
+  'phase-verwerking':  { minMs:  15_000, DuidelijkMs: 45_000 },
+  'phase-afronding':   { minMs:  35_000, DuidelijkMs: 85_000 },
 }
 const MOUSE_SATURATE = 150
 
@@ -306,24 +306,24 @@ function readScoreFromMetrics(
   sectionId: string
 ): number {
   if (!m) return 0
-  const cfg = PHASE_READ_CONFIG[sectionId] ?? { minMs: 8_000, geweldigMs: 30_000 }
+  const cfg = PHASE_READ_CONFIG[sectionId] ?? { minMs: 8_000, DuidelijkMs: 30_000 }
   if (m.totalTimeMs < cfg.minMs) return 0
-  const timeScore   = Math.min(80, Math.round((m.totalTimeMs / cfg.geweldigMs) * 80))
+  const timeScore   = Math.min(80, Math.round((m.totalTimeMs / cfg.DuidelijkMs) * 80))
   const scrollScore = Math.min(12, Math.round(m.maxScrollDepth * 12))
   const mouseScore  = Math.min(8,  Math.round((m.mouseMovements / MOUSE_SATURATE) * 8))
   return Math.min(100, timeScore + scrollScore + mouseScore)
 }
 
 function readTierFromScore(score: number): ReadingTier {
-  if (score >= 65) return 'Geweldig'
-  if (score >= 30) return 'Duidelijk'
-  return 'Verwarrend'
+  if (score >= 90) return 'Duidelijk'
+  if (score >= 60) return 'Oppervlakkig'
+  return 'Slordig'
 }
 
 // ─── Per-phase edit score — binary ───────────────────────────────────────────
 // Below EDIT_MENSELIJK_RATIO of characters changed → AIGegenereerd.
 // At or above → Menselijk. No middle tier.
-const EDIT_MENSELIJK_RATIO = 0.05   // ≥ 5 % of original chars changed → Menselijk
+const EDIT_MENSELIJK_RATIO = 0.15   // ≥ 15 % of original chars changed → Menselijk
 
 // Split EXPERIMENT_TEXT into per-phase buckets once at module load.
 const ORIGINAL_PHASE_TEXT: Record<string, string> = (() => {
@@ -479,21 +479,21 @@ function SimonTracker({ onAnalysis, phaseBlocks, manualEditTexts }: {
 
 // ─── SimonPanel ───────────────────────────────────────────────────────────────
 // Verdict logic:
-//   Reading tier (Verwarrend / Duidelijk / Geweldig) drives the label.
-//   "en AI gegenereerd" qualifier is appended ONLY when reading = Geweldig
+//   Reading tier (Slordig / Oppervlakkig / Duidelijk) drives the label.
+//   "en AI gegenereerd" qualifier is appended ONLY when reading = Duidelijk
 //   AND edit = AIGegenereerd. When that qualifier is shown, the colour stays
-//   amber (not green) and the avatar stays at the Duidelijk face.
+//   amber (not green) and the avatar stays at the Oppervlakkig face.
 //
 // Hints:
-//   • Reading < Geweldig  → "Voor meer duidelijkheid, verifieer de [block] en de [block]."
-//   • Reading = Geweldig + edit = AIGegenereerd
+//   • Reading < Duidelijk  → "Voor meer duidelijkheid, verifieer de [block] en de [block]."
+//   • Reading = Duidelijk + edit = AIGegenereerd
 //                          → "Om de les verder te verbeteren, maak het persoonlijker in de [block] of [block]."
-//   • Reading = Geweldig + edit = Menselijk → no hint
+//   • Reading = Duidelijk + edit = Menselijk → no hint
 //
 // To replace emoji with a custom image, swap the avatar div for:
 //   <img
-//     src={readTier === 'Geweldig' && editTier === 'Menselijk' ? '/simon-happy.png'
-//       : readTier === 'Duidelijk' || (readTier === 'Geweldig' && editTier === 'AIGegenereerd')
+//     src={readTier === 'Duidelijk' && editTier === 'Menselijk' ? '/simon-happy.png'
+//       : readTier === 'Oppervlakkig' || (readTier === 'Duidelijk' && editTier === 'AIGegenereerd')
 //         ? '/simon-neutral.png' : '/simon-sad.png'}
 //     alt="Simon"
 //     className="w-14 h-14 flex-shrink-0 rounded-lg object-cover"
@@ -511,7 +511,7 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
         <div className="px-4 pb-3 flex items-start gap-3">
           <img src={IMG_VS_Neutral} alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
           <p className="text-sm text-gray-600 leading-relaxed pt-1">
-            De lesinhoud is gegenereerd, pas het nog aan op basis van je voorkeur!
+            Simon is de tekst aan het doorlezen, even geguld...
           </p>
         </div>
       </div>
@@ -521,47 +521,47 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
   const { overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels } = analysis
 
   // ── Qualifier text and connector word per (readTier × editTier) ─────────────
-  // Verwarrend + AI  → "en AI gegenereerd"
-  // Verwarrend + Mens → "maar Menselijk"
-  // Duidelijk  + AI  → "maar AI gegenereerd"
-  // Duidelijk  + Mens → "en Menselijk"
-  // Geweldig   + AI  → "en AI gegenereerd"  (label stays amber, avatar stays neutral)
-  // Geweldig   + Mens → no qualifier
+  // Slordig + AI  → "en AI gegenereerd"
+  // Slordig + Mens → "maar Menselijk"
+  // Oppervlakkig  + AI  → "maar AI gegenereerd"
+  // Oppervlakkig  + Mens → "en Menselijk"
+  // Duidelijk   + AI  → "en AI gegenereerd"  (label stays amber, avatar stays neutral)
+  // Duidelijk   + Mens → no qualifier
   type Qualifier = { connector: string; text: string } | null
   const qualifier: Qualifier = (() => {
-    if (overallReadTier === 'Verwarrend') {
+    if (overallReadTier === 'Slordig') {
       return overallEditTier === 'AIGegenereerd'
         ? { connector: 'en', text: 'AI gegenereerd' }
         : { connector: 'maar', text: 'Menselijk' }
     }
-    if (overallReadTier === 'Duidelijk') {
+    if (overallReadTier === 'Oppervlakkig') {
       return overallEditTier === 'AIGegenereerd'
         ? { connector: 'maar', text: 'AI gegenereerd' }
         : { connector: 'en', text: 'Menselijk' }
     }
-    // Geweldig
+    // Duidelijk
     return overallEditTier === 'AIGegenereerd'
       ? { connector: 'maar', text: 'AI gegenereerd' }
       : null
   })()
 
-  // Colour: Geweldig+AI stays amber; all other combos use the reading tier colour
-  const labelColour = (overallReadTier === 'Geweldig' && overallEditTier === 'AIGegenereerd')
+  // Colour: Duidelijk+AI stays amber; all other combos use the reading tier colour
+  const labelColour = (overallReadTier === 'Duidelijk' && overallEditTier === 'AIGegenereerd')
     ? 'text-amber-500'
     : READ_TIER_COLOUR[overallReadTier]
 
   // ── Hint ────────────────────────────────────────────────────────────────────
   let hint: React.ReactNode = null
-  if (overallReadTier !== 'Geweldig') {
-    // Reading not yet Geweldig → suggest which blocks to verify
+  if (overallReadTier !== 'Duidelijk') {
+    // Reading not yet Duidelijk → suggest which blocks to verify
     const [first, second] = weakestReadLabels
     if (first && second && first !== second) {
-      hint = <>Voor meer duidelijkheid, verifieer de <strong>{first}</strong> en de <strong>{second}</strong>.</>
+      hint = <>Voor meer duidelijkheid, lees de <strong>{first}</strong> en de <strong>{second}</strong> door.</>
     } else if (first) {
-      hint = <>Voor meer duidelijkheid, verifieer de <strong>{first}</strong>.</>
+      hint = <>Voor meer duidelijkheid, lees de <strong>{first}</strong> door.</>
     }
   } else if (overallEditTier === 'AIGegenereerd') {
-    // Reading is Geweldig but edit score is low → personalise hint
+    // Reading is Duidelijk but edit score is low → personalise hint
     const aiBlocks = weakestEditLabels.filter((_, i, arr) => arr.indexOf(_) === i).slice(0, 2)
     const [first, second] = aiBlocks
     if (first && second && first !== second) {
@@ -579,9 +579,9 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
       <div className="px-4 pb-3 flex items-start gap-3">
         <img
           src={
-            overallReadTier === 'Verwarrend'
+            overallReadTier === 'Slordig'
               ? IMG_VS_Unhappy
-              : overallReadTier === 'Geweldig' && overallEditTier === 'Menselijk'
+              : overallReadTier === 'Duidelijk' && overallEditTier === 'Menselijk'
                 ? IMG_VS_Happy
                 : IMG_VS_Neutral
           }
@@ -1217,7 +1217,7 @@ function LesDetailsTab({ educatieNiveau, setEducatieNiveau, educatieSpecifiekNiv
                   {lesdoelLoading ? 'Bezig...' : 'Laat AI een lesdoel maken'}
                 </Btn>
                 <Btn variant="secondary" className="flex-1" onClick={() => setShowLesdoelInput(true)}>
-                  Zelf invullen
+                  Zelf lesdoel invullen
                 </Btn>
               </div>
               {wordCount < 3 && <p className="text-xs text-gray-400 mt-2">Vul eerst het onderwerp in (minimaal 3 woorden).</p>}
@@ -1268,7 +1268,7 @@ function LesplanTab({ lesduur, setLesduur, verwerkingOpdracht, lesdoel, onNext }
       <div className="w-full lg:w-3/5 border-r bg-white overflow-y-auto p-6 md:p-10 pb-32">
         <MetroLine step={1} />
         <div className="space-y-6">
-          <Section title="Verwerkingsopdracht" subtitle="Kies een opdracht voor deze fase">
+          <Section title="Verwerkingsopdracht" subtitle="De beste opdracht voor deze les is:">
             <div className="border-2 border-[#039B96] bg-[#039B96]/5 rounded-lg px-4 py-3 flex items-center gap-3 mt-3">
               <div className="w-4 h-4 rounded-full border-2 border-[#039B96] flex items-center justify-center shrink-0">
                 <div className="w-2 h-2 rounded-full bg-[#039B96]" />
@@ -1450,14 +1450,14 @@ function EditorToolbar({ onFormat, onOpenMaxPanel }: { onFormat: (tag: string) =
       <div className="flex-1" />
       <button
         type="button"
-        title="Vraag Max om feedback op deze tekst"
+        title="Selecteer deze fase"
         onClick={e => { e.preventDefault(); onOpenMaxPanel() }}
         className="flex items-center gap-1.5 px-3 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] text-white text-xs font-semibold hover:opacity-90 transition-opacity shrink-0"
       >
         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
         </svg>
-        Geef feedback op Max
+        Selecteer deze fase
       </button>
     </div>
   )
@@ -1978,7 +1978,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
             <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700 max-w-[85%]">
               {phaseLabel
                 ? `Stel je vraag of geef je opmerking over de ${phaseLabel}-fase.`
-                : 'Ik kan helpen bij het evalueren van een tekstgedeelte, door vragen te beantwoorden of de tekst aan te passen op basis van je feedback. Klik op "Geef feedback op Max" om te beginnen!'}
+                : 'Ik kan helpen bij het evalueren van een tekstgedeelte, door vragen te beantwoorden of de tekst aan te passen op basis van je feedback. Klik op "Selecteer deze fase" om te beginnen!'}
             </div>
           </div>
         )}
