@@ -855,7 +855,7 @@ function ExperimentPage() {
       phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
     ) / 1000
     try {
-      const res = await fetch('https://formspree.io/f/mqedwepd', {
+      const res = await fetch('https://formspree.io/f/xojpoypd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1536,7 +1536,7 @@ function htmlToPlain(html: string): string {
     .replace(/\n{3,}/g, '\n\n').trim()
 }
 
-const COHERE_API_KEY = 'Ae0L42NOb7OVm9NUp8iNKN0bDypvpzobqHJOa8Mx' // Replace with your actual key
+const COHERE_API_KEY = 'vmDAT8scnmUn0WGRFGO8hRGxQ3FXrTZhUFE4xJoQ' // Replace with your actual key
 
 const PHASE_LABEL: Record<OutlinePhase, string> = {
   introductie: 'Introductie', instructie: 'Instructie',
