@@ -315,7 +315,7 @@ function readScoreFromMetrics(
 }
 
 function readTierFromScore(score: number): ReadingTier {
-  if (score >= 90) return 'Duidelijk'
+  if (score >= 80) return 'Duidelijk'
   if (score >= 60) return 'Oppervlakkig'
   return 'Slordig'
 }
@@ -323,7 +323,7 @@ function readTierFromScore(score: number): ReadingTier {
 // ─── Per-phase edit score — binary ───────────────────────────────────────────
 // Below EDIT_MENSELIJK_RATIO of characters changed → AIGegenereerd.
 // At or above → Menselijk. No middle tier.
-const EDIT_MENSELIJK_RATIO = 0.15   // ≥ 15 % of original chars changed → Menselijk
+const EDIT_MENSELIJK_RATIO = 0.1   // ≥ 10 % of original chars changed → Menselijk
 
 // Split EXPERIMENT_TEXT into per-phase buckets once at module load.
 const ORIGINAL_PHASE_TEXT: Record<string, string> = (() => {
@@ -511,7 +511,7 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
         <div className="px-4 pb-3 flex items-start gap-3">
           <img src={IMG_VS_Neutral} alt="Simon" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover" />
           <p className="text-sm text-gray-600 leading-relaxed pt-1">
-            Simon is de tekst aan het doorlezen, even geguld...
+            Simon kijkt over je schouders mee, lees de tekst op je eigen tempo door.
           </p>
         </div>
       </div>
@@ -556,9 +556,9 @@ function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
     // Reading not yet Duidelijk → suggest which blocks to verify
     const [first, second] = weakestReadLabels
     if (first && second && first !== second) {
-      hint = <>Voor meer duidelijkheid, lees de <strong>{first}</strong> en de <strong>{second}</strong> door.</>
+      hint = <>Voor meer duidelijkheid, lees de <strong>{first}</strong> en de <strong>{second}</strong> (nog eens) door.</>
     } else if (first) {
-      hint = <>Voor meer duidelijkheid, lees de <strong>{first}</strong> door.</>
+      hint = <>Voor meer duidelijkheid, lees de <strong>{first}</strong> (nog eens) door.</>
     }
   } else if (overallEditTier === 'AIGegenereerd') {
     // Reading is Duidelijk but edit score is low → personalise hint
@@ -1217,7 +1217,7 @@ function LesDetailsTab({ educatieNiveau, setEducatieNiveau, educatieSpecifiekNiv
                   {lesdoelLoading ? 'Bezig...' : 'Laat AI een lesdoel maken'}
                 </Btn>
                 <Btn variant="secondary" className="flex-1" onClick={() => setShowLesdoelInput(true)}>
-                  Zelf lesdoel invullen
+                  Zelf het lesdoel invullen
                 </Btn>
               </div>
               {wordCount < 3 && <p className="text-xs text-gray-400 mt-2">Vul eerst het onderwerp in (minimaal 3 woorden).</p>}
