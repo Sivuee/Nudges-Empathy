@@ -859,7 +859,7 @@ function ExperimentPage() {
       phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
     ) / 1000
     try {
-      const res = await fetch('https://formspree.io/f/xojpoypd', {
+      const res = await fetch('https://formspree.io/f/mqedwepd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
