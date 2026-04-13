@@ -294,10 +294,10 @@ const READ_TIER_COLOUR: Record<ReadingTier, string> = {
 // minMs      = hard gate: below this the block stays Slordig.
 // DuidelijkMs = time at which the block reaches full (80 pt) time score.
 const PHASE_READ_CONFIG: Record<string, { minMs: number; DuidelijkMs: number }> = {
-  'phase-introductie': { minMs:  80_000, DuidelijkMs: 170_000 },
-  'phase-instructie':  { minMs: 40_000, DuidelijkMs: 100_000 },
-  'phase-verwerking':  { minMs:  15_000, DuidelijkMs: 45_000 },
-  'phase-afronding':   { minMs:  35_000, DuidelijkMs: 85_000 },
+  'phase-introductie': { minMs:  80_000, DuidelijkMs: 120_000 },
+  'phase-instructie':  { minMs: 40_000, DuidelijkMs: 50_000 },
+  'phase-verwerking':  { minMs:  15_000, DuidelijkMs: 25_000 },
+  'phase-afronding':   { minMs:  35_000, DuidelijkMs: 55_000 },
 }
 const MOUSE_SATURATE = 150
 
