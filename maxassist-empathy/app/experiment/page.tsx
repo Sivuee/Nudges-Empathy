@@ -424,12 +424,14 @@ function buildReadingAnalysis(
     ? 'Menselijk'
     : 'AIGegenereerd'
 
-  // Two weakest read blocks — only phases that have NOT yet reached Duidelijk.
-  // This means a hint only disappears when the phase genuinely reaches the top
-  // tier, not just because another phase temporarily scores slightly higher.
+  // Two weakest read blocks — only phases that have NOT yet reached Duidelijk,
+  // sorted by fixed phase order (not by live score) so the hint label never
+  // changes just because scores shuffle between non-completed phases.
+  // A phase only leaves this list when it genuinely reaches the Duidelijk tier.
+  const PHASE_ORDER = ['phase-introductie', 'phase-instructie', 'phase-verwerking', 'phase-afronding']
   const weakestReadLabels = [...sections]
     .filter(s => s.readTier !== 'Duidelijk')
-    .sort((a, b) => a.readScore - b.readScore)
+    .sort((a, b) => PHASE_ORDER.indexOf(a.sectionId) - PHASE_ORDER.indexOf(b.sectionId))
     .slice(0, 2)
     .map(s => s.label)
 
@@ -776,9 +778,11 @@ function ExperimentPage() {
       const overallReadTier   = readTierFromScore(averageReadScore)
       const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
         ? 'Menselijk' : 'AIGegenereerd'
+      const PHASE_ORDER = ['phase-introductie', 'phase-instructie', 'phase-verwerking', 'phase-afronding']
       const weakestReadLabels = [...mergedSections]
         .filter(s => s.readTier !== 'Duidelijk')
-        .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
+        .sort((a, b) => PHASE_ORDER.indexOf(a.sectionId) - PHASE_ORDER.indexOf(b.sectionId))
+        .slice(0, 2).map(s => s.label)
       const weakestEditLabels = [...mergedSections]
         .sort((a, b) => {
           if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
@@ -857,7 +861,7 @@ function ExperimentPage() {
       phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
     ) / 1000
     try {
-      const res = await fetch('https://formspree.io/f/mqedwepd', {
+      const res = await fetch('https://formspree.io/f/xojpoypd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
