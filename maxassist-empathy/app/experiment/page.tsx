@@ -503,9 +503,7 @@ function SimonTracker({ onAnalysis, phaseBlocks, manualEditTexts }: {
 //   />
 //   Place image files in the /public folder of the project.
 function SimonPanel({ analysis }: { analysis: ReadingAnalysis | null }) {
-  const hasData = analysis !== null && analysis.sections.some(s => s.readScore > 0)
-
-  if (!hasData || !analysis) {
+  if (!analysis) {
     return (
       <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 overflow-hidden">
         <div className="px-4 py-2.5">
