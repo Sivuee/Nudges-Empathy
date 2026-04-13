@@ -1319,10 +1319,12 @@ function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText,
       if (oldTopic && oldTopic.title !== title) {
         const escaped = oldTopic.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         const regex = new RegExp(`(###\\s+)${escaped}`, 'g')
+        // Update phaseBlocks so the ### heading text changes in the editor on next mount
         setPhaseBlocks((prev: any) => ({
           ...prev,
           [phase]: prev[phase].map((block: string) => block.replace(regex, `### ${title}`))
         }))
+        // Update lesText for metrics/voorvertoning
         setLesText((prev: string) => prev.replace(regex, `### ${title}`))
       }
       return { ...p, [phase]: { ...p[phase], topics: p[phase].topics.map((t: any) => t.id === id ? { ...t, title } : t) } }
@@ -1341,6 +1343,7 @@ function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText,
 
   return (
     <div className="flex h-full overflow-hidden relative">
+      {/* Loader covers the entire pane */}
       <MaxLoader visible={!loaded} message="Max maakt de lesstructuur voor je. Pak vast een kopje koffie! ☕" />
 
       <div className="w-full lg:w-3/5 border-r bg-white overflow-y-auto p-6 md:p-10 pb-32">
@@ -1363,6 +1366,7 @@ function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText,
                     <div className="space-y-2">
                       {topics.map((topic: any, idx: number) => (
                         <div key={topic.id} className="rounded-xl border border-input bg-gray-50 p-3 flex items-center gap-3 group/topic">
+                          {/* Numbered pill — like original lesoverzicht blocks */}
                           <span className="w-6 h-6 rounded-full bg-[#039B96] text-white text-xs font-bold flex items-center justify-center shrink-0">
                             {idx + 1}
                           </span>
