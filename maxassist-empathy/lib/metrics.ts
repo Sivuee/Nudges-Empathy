@@ -47,12 +47,14 @@ export type ErrorResult = 'corrected' | 'uncorrected' | 'undetectable'
  *
  * SUBSTITUTION: wrong term replaced by a correct one.
  *   Scored corrected: error term gone AND at least one accepted correct term present.
+ *   Use acceptedCorrections: [''] to allow pure deletion (no replacement required).
  *
  * FABRICATED_ENTITY: invented name / term / law that should simply be removed.
  *   Scored corrected: fabricated term is gone. No replacement required.
  *
  * WRONG_SECTION: a real example placed under the wrong heading.
  *   Scored corrected: term absent from the wrong section (deleted or moved).
+ *   Uses multiple split terms so the heading can be found even if slightly reworded.
  *
  * UNDETECTABLE: conceptual or numeric errors with no reliable string fingerprint.
  *   Excluded from the automated rate entirely.
@@ -64,48 +66,76 @@ type ErrorSpec = {
   acceptedCorrections?: string[]   // at least one must be PRESENT ('' = deletion counts)
   fabricatedTerms?: string[]       // must be ABSENT for fabricated_entity
   targetTerm?: string              // misplaced phrase for wrong_section
-  sectionSplitTerm?: string        // heading that divides the two sections
+  // Multiple candidate split terms tried in order; first match wins.
+  // This makes splitting robust to minor heading rewording by participants.
+  sectionSplitTerms?: string[]
   wrongSection?: 'before' | 'after'
 }
 
 /**
- * Error specs for the new Formatieve vs Summatieve Evaluatie experiment text.
+ * Error specs for the Formatieve vs Summatieve Evaluatie experiment text.
  *
- * E1  "20% sneller leren" — fabricated statistic (any % could replace it)       → undetectable
- * E2  "alleen effectief leert als je beide technieken" — conceptual mirage       → undetectable
- * E3  "sprint evaluaties" — fabricated term, should simply be removed            → fabricated_entity
- * E4  "moeilijker" → should be "makkelijker"                                     → substitution
- * E5  "zeventiende eeuw" → should be "twintigste eeuw"                           → substitution
- * E6  "H. Poirot" — fabricated professor, should be removed                      → fabricated_entity
- * E7  "summatieve beoordeling" in zelfevaluatie sentence → "formatieve"          → substitution
- * E8  "Beoordeling van je werkstuk met een cijfer" in formatieve list             → wrong_section
- * E9  "Feedback van een docent op een concept van je werkstuk" in summatieve list → wrong_section
- * E10 "Education Assessment Act" — fabricated legislation, should be removed     → fabricated_entity
+ * E1  "2031" — fabricated year; removing it (with or without replacing "1968") counts.
+ *     Changed from substitution→fabricated_entity because participants who delete the
+ *     sentence or remove only the year should not be penalised for not knowing 1968.
+ *
+ * E2  "Subjectieve evaluatie" — fabricated term replacing "Summatieve evaluatie"
+ *     in the body paragraph; simply removing it counts.               → fabricated_entity
+ *
+ * E3  "sprint evaluaties" — fabricated term that should be removed.   → fabricated_entity
+ *
+ * E4  "moeilijker" → "makkelijker" — the errorTerms now only anchor on
+ *     the word itself (not the whole sentence) to avoid fragile long-string matching.
+ *     The error: "niet alleen moeilijker, maar ook succesvoller"
+ *     Corrected: "makkelijker", "eenvoudiger", or "beter haalbaar" present and
+ *                "moeilijker" absent from that same neighbourhood.
+ *     NOTE: "moeilijker" is a common Dutch word that can appear legitimately elsewhere
+ *     (e.g. in the baseline reflectie section "sommige voorbeelden makkelijker te
+ *     vinden waren dan andere"). We therefore only flag the error when it appears
+ *     in the specific error phrase; a lone "moeilijker" elsewhere does NOT block
+ *     correction.                                                      → substitution
+ *
+ * E5  "zeventiende eeuw" → "twintigste eeuw"                          → substitution
+ *
+ * E6  "H. Poirot" — fabricated professor.                             → fabricated_entity
+ *
+ * E7  "summatieve beoordeling" in zelfevaluatie sentence → "formatieve" → substitution
+ *
+ * E8  "Beoordeling van je werkstuk met een cijfer" in formatieve list → wrong_section
+ *     sectionSplitTerms now includes several candidate headings so the split
+ *     is found even if participants lightly reword the summatieve heading.
+ *
+ * E9  "Feedback van een docent op een concept van je werkstuk" in summatieve list
+ *     → wrong_section (same robust split logic as E8)
+ *
+ * E10 "Education Assessment Act" — fabricated legislation.            → fabricated_entity
  */
 const ERROR_SPECS: ErrorSpec[] = [
   {
+    // E1 — Year "2031" is fabricated. Deleting the year (or the whole sentence) counts.
+    // Changed to fabricated_entity: requiring "1968" as a replacement was too strict.
     id: 'E1',
-    strategy: 'substitution',
-    errorTerms: ['2031'],
-    acceptedCorrections: [
-      '1968',
-    ],
-  },
-  {
-    id: 'E2',
-    // "alleen effectief leert als je beide technieken gebruikt" — conceptual mirage.
     strategy: 'fabricated_entity',
-    fabricatedTerms: ['subjectieve evaluatie', 'Subjectieve evaluatie'],
+    fabricatedTerms: ['2031'],
   },
   {
+    // E2 — "Subjectieve evaluatie" replaces "Summatieve evaluatie" in a body paragraph.
+    // It is a fabricated replacement term; removal (with or without restoration) counts.
+    id: 'E2',
+    strategy: 'fabricated_entity',
+    fabricatedTerms: ['subjectieve evaluatie'],
+  },
+  {
+    // E3 — "sprint evaluaties" is a fabricated term that should simply be removed.
     id: 'E3',
-    // "sprint evaluaties" is a fabricated term that should simply be removed.
     strategy: 'fabricated_entity',
     fabricatedTerms: ['sprint evaluaties', 'sprint evaluatie'],
   },
   {
+    // E4 — "moeilijker" should be "makkelijker" in the motivation sentence.
+    // We match only the specific error phrase, not standalone occurrences of "moeilijker"
+    // that may appear in correct context elsewhere in the text.
     id: 'E4',
-    // "moeilijker" should be "makkelijker" in the motivation sentence.
     strategy: 'substitution',
     errorTerms: [
       'niet alleen moeilijker, maar ook succesvoller',
@@ -116,8 +146,8 @@ const ERROR_SPECS: ErrorSpec[] = [
     ],
   },
   {
+    // E5 — "zeventiende eeuw" should be "twintigste eeuw".
     id: 'E5',
-    // "zeventiende eeuw" should be "twintigste eeuw".
     strategy: 'substitution',
     errorTerms: ['zeventiende eeuw', 'zeventiende-eeuwse'],
     acceptedCorrections: [
@@ -126,14 +156,14 @@ const ERROR_SPECS: ErrorSpec[] = [
     ],
   },
   {
+    // E6 — "H. Poirot" — fabricated professor; any mention keeps the error alive.
     id: 'E6',
-    // "H. Poirot" — fabricated professor; any mention keeps the error alive.
     strategy: 'fabricated_entity',
     fabricatedTerms: ['H. Poirot', 'Poirot'],
   },
   {
+    // E7 — "Zelfevaluatie is daarbij een vorm van summatieve beoordeling" → "formatieve".
     id: 'E7',
-    // "Zelfevaluatie is daarbij een vorm van summatieve beoordeling" → should be "formatieve".
     strategy: 'substitution',
     errorTerms: ['Zelfevaluatie is daarbij een vorm van summatieve beoordeling'],
     acceptedCorrections: [
@@ -143,28 +173,41 @@ const ERROR_SPECS: ErrorSpec[] = [
     ],
   },
   {
+    // E8 — "Beoordeling van je werkstuk met een cijfer" is wrongly listed under
+    // formatieve evaluatie. Corrected if absent from the formatieve section
+    // (i.e. absent from the text BEFORE the summatieve examples heading).
+    //
+    // Multiple candidate split terms are tried in order; the first one found in
+    // the text is used. This handles participants who slightly rephrase the heading.
     id: 'E8',
-    // "Beoordeling van je werkstuk met een cijfer" is incorrectly listed under
-    // formatieve evaluatie. It is a summatieve evaluatie example.
-    // Corrected if absent from the formatieve section (deleted OR moved to summatieve).
     strategy: 'wrong_section',
     targetTerm: 'Beoordeling van je werkstuk met een cijfer',
-    sectionSplitTerm: 'Voorbeelden van summatieve',
-    wrongSection: 'before',  // currently (wrongly) in the formatieve block = before the split
+    sectionSplitTerms: [
+      'Voorbeelden van summatieve evaluatie',
+      'Voorbeelden van summatieve',
+      'summatieve evaluatie:',
+      'summatieve evaluatie',
+    ],
+    wrongSection: 'before',
   },
   {
+    // E9 — "Feedback van een docent op een concept van je werkstuk" is wrongly listed
+    // under summatieve evaluatie. Corrected if absent from the summatieve section
+    // (i.e. absent from the text AFTER the summatieve examples heading).
     id: 'E9',
-    // "Feedback van een docent op een concept van je werkstuk" is incorrectly listed
-    // under summatieve evaluatie. It is a formatieve evaluatie example.
-    // Corrected if absent from the summatieve section (deleted OR moved to formatieve).
     strategy: 'wrong_section',
     targetTerm: 'Feedback van een docent op een concept van je werkstuk',
-    sectionSplitTerm: 'Voorbeelden van summatieve',
-    wrongSection: 'after',   // currently (wrongly) in the summatieve block = after the split
+    sectionSplitTerms: [
+      'Voorbeelden van summatieve evaluatie',
+      'Voorbeelden van summatieve',
+      'summatieve evaluatie:',
+      'summatieve evaluatie',
+    ],
+    wrongSection: 'after',
   },
   {
+    // E10 — "Education Assessment Act" — fabricated legislation; must simply be removed.
     id: 'E10',
-    // "Education Assessment Act" — fabricated legislation; must simply be removed.
     strategy: 'fabricated_entity',
     fabricatedTerms: ['Education Assessment Act'],
   },
@@ -182,12 +225,24 @@ function evaluateError(spec: ErrorSpec, text: string): ErrorResult {
     }
 
     case 'wrong_section': {
-      const { targetTerm, sectionSplitTerm, wrongSection } = spec
-      if (!targetTerm || !sectionSplitTerm || !wrongSection) return 'undetectable'
+      const { targetTerm, sectionSplitTerms, wrongSection } = spec
+      if (!targetTerm || !sectionSplitTerms?.length || !wrongSection) return 'undetectable'
 
-      const splitIdx = text.toLowerCase().indexOf(sectionSplitTerm.toLowerCase())
+      const lowerText = text.toLowerCase()
 
-      // If the split heading is not found, fall back to full-text check.
+      // Try each candidate split term in order; use the first one found.
+      let splitIdx = -1
+      for (const term of sectionSplitTerms) {
+        const idx = lowerText.indexOf(term.toLowerCase())
+        if (idx !== -1) {
+          splitIdx = idx
+          break
+        }
+      }
+
+      // If no split heading is found at all, fall back to a full-text check.
+      // (If the participant deleted the entire summatieve section, the misplaced
+      // item would also be gone, so 'corrected' is appropriate.)
       if (splitIdx === -1) {
         return contains(text, targetTerm) ? 'uncorrected' : 'corrected'
       }
@@ -206,12 +261,12 @@ function evaluateError(spec: ErrorSpec, text: string): ErrorResult {
       const errorTerms = spec.errorTerms ?? []
       const accepted   = spec.acceptedCorrections ?? []
 
-      // Any error term still present → uncorrected (prevents "expanded around the error" loophole).
+      // Any error term still present → uncorrected.
       if (errorTerms.some(t => contains(text, t))) return 'uncorrected'
 
       // Error term is gone. Check for a plausible correction.
       if (accepted.length === 0) return 'corrected'
-      if (accepted.includes(''))  return 'corrected'  // '' sentinel means deletion alone counts
+      if (accepted.includes(''))  return 'corrected'  // '' sentinel: deletion alone counts
       return containsAny(text, accepted.filter(a => a !== '')) ? 'corrected' : 'uncorrected'
     }
   }
