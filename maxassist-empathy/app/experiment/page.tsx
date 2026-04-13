@@ -1311,34 +1311,130 @@ function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText,
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 4000); return () => clearTimeout(t) }
   }, [loaded, setLoaded])
 
+  // drag state: which topic is being dragged
+  const dragItem  = React.useRef<{ phase: OutlinePhase; idx: number } | null>(null)
+  const dragOver  = React.useRef<{ phase: OutlinePhase; idx: number } | null>(null)
+  const [dragState, setDragState] = React.useState<{ phase: OutlinePhase; idx: number } | null>(null)
+  const [dropTarget, setDropTarget] = React.useState<{ phase: OutlinePhase; idx: number } | null>(null)
+
   const toggle = (phase: OutlinePhase) =>
     setLessonOutline((p: any) => ({ ...p, [phase]: { ...p[phase], active: !p[phase].active } }))
+
   const updateTopic = (phase: OutlinePhase, id: string, title: string) => {
     setLessonOutline((p: any) => {
       const oldTopic = p[phase].topics.find((t: any) => t.id === id)
       if (oldTopic && oldTopic.title !== title) {
         const escaped = oldTopic.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         const regex = new RegExp(`(###\\s+)${escaped}`, 'g')
-        // Update phaseBlocks so the ### heading text changes in the editor on next mount
         setPhaseBlocks((prev: any) => ({
           ...prev,
           [phase]: prev[phase].map((block: string) => block.replace(regex, `### ${title}`))
         }))
-        // Update lesText for metrics/voorvertoning
         setLesText((prev: string) => prev.replace(regex, `### ${title}`))
       }
       return { ...p, [phase]: { ...p[phase], topics: p[phase].topics.map((t: any) => t.id === id ? { ...t, title } : t) } }
     })
   }
+
   const deleteTopic = (phase: OutlinePhase, id: string) =>
     setLessonOutline((p: any) => ({ ...p, [phase]: { ...p[phase], topics: p[phase].topics.filter((t: any) => t.id !== id) } }))
-  const moveTopic = (phase: OutlinePhase, idx: number, dir: 'up' | 'down') =>
+
+  /**
+   * Reorder topics within a phase AND reorder the corresponding ### blocks in phaseBlocks/lesText.
+   */
+  const reorderTopics = (phase: OutlinePhase, fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return
     setLessonOutline((p: any) => {
-      const topics = [...p[phase].topics]; const j = dir === 'up' ? idx - 1 : idx + 1
-      if (j < 0 || j >= topics.length) return p;
-      [topics[idx], topics[j]] = [topics[j], topics[idx]]
+      const topics = [...p[phase].topics]
+      const [moved] = topics.splice(fromIdx, 1)
+      topics.splice(toIdx, 0, moved)
       return { ...p, [phase]: { ...p[phase], topics } }
     })
+
+    // Also reorder the text blocks so the Les tab reflects the new order
+    setPhaseBlocks((prev: any) => {
+      const blockText: string = (prev[phase] as string[]).join('\n\n')
+      const chunks = parsePhaseChunks(blockText)
+      // Build a map from heading title → chunk
+      const chunkMap: Record<string, { heading: string; body: string }> = {}
+      for (const c of chunks) { if (c.heading) chunkMap[c.heading] = c }
+
+      const currentTopics: { id: string; title: string }[] = lessonOutline[phase].topics
+      const reorderedTopics = [...currentTopics]
+      const [movedTopic] = reorderedTopics.splice(fromIdx, 1)
+      reorderedTopics.splice(toIdx, 0, movedTopic)
+
+      // Rebuild chunks in new order; topics without a matching chunk get an empty body
+      const leadChunk = chunks.find(c => !c.heading)
+      const reordered: { heading: string; body: string }[] = []
+      if (leadChunk && leadChunk.body.trim()) reordered.push(leadChunk)
+      for (const t of reorderedTopics) {
+        reordered.push(chunkMap[t.title] ?? { heading: t.title, body: '' })
+      }
+
+      const newText = buildPhaseText(reordered)
+      return { ...prev, [phase]: [newText] }
+    })
+
+    // Keep lesText in sync too (used by voorvertoning & metrics)
+    setLesText((prev: string) => {
+      // Re-parse the full lesText, update just this phase's section
+      const phaseMarker = `## ${PHASE_TITLES[phase]}`
+      const phaseOrder: OutlinePhase[] = ['introductie', 'instructie', 'verwerking', 'afronding']
+      const phaseIdx = phaseOrder.indexOf(phase)
+      const markers = phaseOrder.map(p => `## ${PHASE_TITLES[p]}`)
+
+      const start = prev.indexOf(phaseMarker)
+      if (start === -1) return prev
+      let end = prev.length
+      for (let i = phaseIdx + 1; i < markers.length; i++) {
+        const pos = prev.indexOf(markers[i], start + 1)
+        if (pos !== -1) { end = pos; break }
+      }
+
+      const phaseSection = prev.slice(start + phaseMarker.length, end).trimStart()
+      const chunks = parsePhaseChunks(phaseSection)
+      const chunkMap: Record<string, { heading: string; body: string }> = {}
+      for (const c of chunks) { if (c.heading) chunkMap[c.heading] = c }
+
+      const currentTopics: { id: string; title: string }[] = lessonOutline[phase].topics
+      const reorderedTopics = [...currentTopics]
+      const [movedTopic] = reorderedTopics.splice(fromIdx, 1)
+      reorderedTopics.splice(toIdx, 0, movedTopic)
+
+      const leadChunk = chunks.find(c => !c.heading)
+      const reordered: { heading: string; body: string }[] = []
+      if (leadChunk && leadChunk.body.trim()) reordered.push(leadChunk)
+      for (const t of reorderedTopics) {
+        reordered.push(chunkMap[t.title] ?? { heading: t.title, body: '' })
+      }
+
+      const newPhaseBody = buildPhaseText(reordered)
+      return prev.slice(0, start) + phaseMarker + '\n\n' + newPhaseBody + '\n\n' + prev.slice(end)
+    })
+  }
+
+  const handleDragStart = (phase: OutlinePhase, idx: number) => {
+    dragItem.current = { phase, idx }
+    setDragState({ phase, idx })
+  }
+  const handleDragEnter = (phase: OutlinePhase, idx: number) => {
+    if (!dragItem.current || dragItem.current.phase !== phase) return
+    dragOver.current = { phase, idx }
+    setDropTarget({ phase, idx })
+  }
+  const handleDragEnd = () => {
+    if (dragItem.current && dragOver.current &&
+        dragItem.current.phase === dragOver.current.phase &&
+        dragItem.current.idx !== dragOver.current.idx) {
+      reorderTopics(dragItem.current.phase, dragItem.current.idx, dragOver.current.idx)
+    }
+    dragItem.current  = null
+    dragOver.current  = null
+    setDragState(null)
+    setDropTarget(null)
+  }
+
   const hasActive = (Object.keys(PHASE_TITLES) as OutlinePhase[]).some(k => lessonOutline[k].active)
 
   return (
@@ -1364,27 +1460,52 @@ function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText,
                 <div className="px-5 pb-5">
                   {active ? (
                     <div className="space-y-2">
-                      {topics.map((topic: any, idx: number) => (
-                        <div key={topic.id} className="rounded-xl border border-input bg-gray-50 p-3 flex items-center gap-3 group/topic">
-                          {/* Numbered pill — like original lesoverzicht blocks */}
-                          <span className="w-6 h-6 rounded-full bg-[#039B96] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                            {idx + 1}
-                          </span>
-                          <div className="flex-1 relative flex items-center gap-1.5 min-w-0">
-                            <input
-                              defaultValue={topic.title}
-                              onBlur={e => updateTopic(phase, topic.id, e.target.value)}
-                              title="Klik om de titel te bewerken"
-                              className="flex-1 border-0 bg-transparent text-sm focus:outline-none focus:ring-0 p-0 text-gray-800 hover:text-[#039B96] focus:border-b focus:border-[#039B96] cursor-text transition-colors min-w-0"
-                            />
-                            <svg className="w-3.5 h-3.5 text-gray-300 group-hover/topic:text-[#039B96] shrink-0 transition-colors pointer-events-none"
+                      {topics.map((topic: any, idx: number) => {
+                        const isDragging  = dragState?.phase  === phase && dragState?.idx  === idx
+                        const isDropZone  = dropTarget?.phase === phase && dropTarget?.idx === idx && dragItem.current?.idx !== idx
+                        return (
+                          <div
+                            key={topic.id}
+                            draggable
+                            onDragStart={() => handleDragStart(phase, idx)}
+                            onDragEnter={() => handleDragEnter(phase, idx)}
+                            onDragOver={e => e.preventDefault()}
+                            onDragEnd={handleDragEnd}
+                            className={[
+                              'rounded-xl border p-3 flex items-center gap-3 group/topic select-none transition-all',
+                              isDragging  ? 'opacity-40 border-dashed border-[#039B96] bg-[#039B96]/5' : 'bg-gray-50 border-gray-200',
+                              isDropZone  ? 'border-[#039B96] border-2 bg-[#039B96]/10 scale-[1.01]' : '',
+                              'cursor-grab active:cursor-grabbing',
+                            ].join(' ')}
+                          >
+                            {/* Drag handle */}
+                            <svg className="w-4 h-4 text-gray-300 group-hover/topic:text-gray-400 shrink-0 transition-colors"
                               fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                d="M4 8h16M4 16h16" />
                             </svg>
+                            {/* Numbered pill */}
+                            <span className="w-6 h-6 rounded-full bg-[#039B96] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1 relative flex items-center gap-1.5 min-w-0">
+                              <input
+                                defaultValue={topic.title}
+                                onBlur={e => updateTopic(phase, topic.id, e.target.value)}
+                                onClick={e => e.stopPropagation()}
+                                onMouseDown={e => e.stopPropagation()}
+                                title="Klik om de titel te bewerken"
+                                className="flex-1 border-0 bg-transparent text-sm focus:outline-none focus:ring-0 p-0 text-gray-800 hover:text-[#039B96] focus:border-b focus:border-[#039B96] cursor-text transition-colors min-w-0"
+                              />
+                              <svg className="w-3.5 h-3.5 text-gray-300 group-hover/topic:text-[#039B96] shrink-0 transition-colors pointer-events-none"
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   ) : (
                     <p className="text-sm text-gray-400 italic">Deze fase wordt niet gebruikt in de les</p>
