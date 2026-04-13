@@ -294,10 +294,10 @@ const READ_TIER_COLOUR: Record<ReadingTier, string> = {
 // minMs      = hard gate: below this the block stays Slordig.
 // DuidelijkMs = time at which the block reaches full (80 pt) time score.
 const PHASE_READ_CONFIG: Record<string, { minMs: number; DuidelijkMs: number }> = {
-  'phase-introductie': { minMs:  80_000, DuidelijkMs: 120_000 },
-  'phase-instructie':  { minMs: 40_000, DuidelijkMs: 50_000 },
-  'phase-verwerking':  { minMs:  15_000, DuidelijkMs: 25_000 },
-  'phase-afronding':   { minMs:  35_000, DuidelijkMs: 55_000 },
+  'phase-introductie': { minMs:  80_000, DuidelijkMs: 130_000 },
+  'phase-instructie':  { minMs: 40_000, DuidelijkMs: 70_000 },
+  'phase-verwerking':  { minMs:  15_000, DuidelijkMs: 35_000 },
+  'phase-afronding':   { minMs:  35_000, DuidelijkMs: 65_000 },
 }
 const MOUSE_SATURATE = 150
 
@@ -424,14 +424,12 @@ function buildReadingAnalysis(
     ? 'Menselijk'
     : 'AIGegenereerd'
 
-  // Two weakest read blocks — only phases that have NOT yet reached Duidelijk,
-  // sorted by fixed phase order (not by live score) so the hint label never
-  // changes just because scores shuffle between non-completed phases.
-  // A phase only leaves this list when it genuinely reaches the Duidelijk tier.
-  const PHASE_ORDER = ['phase-introductie', 'phase-instructie', 'phase-verwerking', 'phase-afronding']
+  // Two weakest read blocks — only phases that have NOT yet reached Duidelijk.
+  // This means a hint only disappears when the phase genuinely reaches the top
+  // tier, not just because another phase temporarily scores slightly higher.
   const weakestReadLabels = [...sections]
     .filter(s => s.readTier !== 'Duidelijk')
-    .sort((a, b) => PHASE_ORDER.indexOf(a.sectionId) - PHASE_ORDER.indexOf(b.sectionId))
+    .sort((a, b) => a.readScore - b.readScore)
     .slice(0, 2)
     .map(s => s.label)
 
@@ -778,11 +776,9 @@ function ExperimentPage() {
       const overallReadTier   = readTierFromScore(averageReadScore)
       const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
         ? 'Menselijk' : 'AIGegenereerd'
-      const PHASE_ORDER = ['phase-introductie', 'phase-instructie', 'phase-verwerking', 'phase-afronding']
       const weakestReadLabels = [...mergedSections]
         .filter(s => s.readTier !== 'Duidelijk')
-        .sort((a, b) => PHASE_ORDER.indexOf(a.sectionId) - PHASE_ORDER.indexOf(b.sectionId))
-        .slice(0, 2).map(s => s.label)
+        .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
       const weakestEditLabels = [...mergedSections]
         .sort((a, b) => {
           if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
@@ -1976,7 +1972,120 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
   )
 }
 
+// ─── Line diff utilities ─────────────────────────────────────────────────────
+type DiffPart = { text: string; type: 'equal' | 'added' | 'removed' }
+
+function lineDiff(oldText: string, newText: string): DiffPart[] {
+  const a = oldText.split('\n'), b = newText.split('\n')
+  const m = a.length, n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1])
+  const out: DiffPart[] = []
+  let i = m, j = n
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+      out.unshift({ text: a[i-1], type: 'equal' }); i--; j--
+    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+      out.unshift({ text: b[j-1], type: 'added' }); j--
+    } else {
+      out.unshift({ text: a[i-1], type: 'removed' }); i--
+    }
+  }
+  return out
+}
+
+function compactDiff(parts: DiffPart[], ctx = 1): DiffPart[] {
+  const changed = new Set(parts.flatMap((p, i) => p.type !== 'equal' ? [i] : []))
+  const keep = new Set<number>()
+  changed.forEach(idx => {
+    for (let d = -ctx; d <= ctx; d++) {
+      const c = idx + d
+      if (c >= 0 && c < parts.length) keep.add(c)
+    }
+  })
+  const out: DiffPart[] = []
+  let lastSkipped = false
+  parts.forEach((p, i) => {
+    if (keep.has(i)) { out.push(p); lastSkipped = false }
+    else if (!lastSkipped) { out.push({ text: '…', type: 'equal' }); lastSkipped = true }
+  })
+  return out
+}
+
+// Converts markdown to HTML, wrapping added lines with a yellow highlight mark.
+function markdownToHtmlWithHighlight(text: string, addedLines: Set<string>): string {
+  const lines = text.split('\n')
+  const parts: string[] = []
+  let i = 0
+  const HL = 'style="background-color:#fef9c3;border-radius:3px;padding:0 2px;"'
+  const wl = (content: string, line: string) =>
+    (addedLines.has(line) && line.trim()) ? `<mark ${HL}>${content}</mark>` : content
+
+  while (i < lines.length) {
+    const line = lines[i]
+    if (/^###\s*/.test(line)) { parts.push(wl(`<h3>${escHtml(line.replace(/^###\s*/, ''))}</h3>`, line)); i++; continue }
+    if (/^##\s*/.test(line))  { parts.push(wl(`<h2>${escHtml(line.replace(/^##\s*/, ''))}</h2>`, line)); i++; continue }
+    if (/^#\s*/.test(line))   { parts.push(wl(`<h1>${escHtml(line.replace(/^#\s*/, ''))}</h1>`, line)); i++; continue }
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      const items: string[] = []
+      const isAdded = addedLines.has(line) && !!line.trim()
+      while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
+        items.push(`<li>${inlineFormat(lines[i].slice(2))}</li>`); i++
+      }
+      const ul = `<ul>${items.join('')}</ul>`
+      parts.push(isAdded ? `<mark ${HL}>${ul}</mark>` : ul); continue
+    }
+    if (/^\d+\. /.test(line)) {
+      const items: string[] = []
+      const isAdded = addedLines.has(line) && !!line.trim()
+      while (i < lines.length && /^\d+\. /.test(lines[i])) {
+        items.push(`<li>${inlineFormat(lines[i].replace(/^\d+\. /, ''))}</li>`); i++
+      }
+      const ol = `<ol>${items.join('')}</ol>`
+      parts.push(isAdded ? `<mark ${HL}>${ol}</mark>` : ol); continue
+    }
+    if (!line.trim()) { parts.push('<p><br></p>'); i++; continue }
+    parts.push(wl(`<p>${inlineFormat(line)}</p>`, line)); i++
+  }
+  return parts.join('')
+}
+
+function DiffView({ parts }: { parts: DiffPart[] }) {
+  const hasChanges = parts.some(p => p.type !== 'equal')
+  if (!hasChanges) return null
+  const compact = compactDiff(parts, 1)
+  return (
+    <div className="mt-2 rounded-lg border border-gray-200 bg-white overflow-auto max-h-36 text-[11px] font-mono leading-relaxed">
+      {compact.map((part, i) => {
+        if (part.type === 'equal' && part.text === '…')
+          return <div key={i} className="px-2 py-px text-gray-400 select-none">…</div>
+        if (part.type === 'equal' && !part.text.trim()) return null
+        if (part.type === 'equal')
+          return <div key={i} className="px-2 py-px text-gray-400 whitespace-pre-wrap">{part.text}</div>
+        if (part.type === 'added')
+          return <div key={i} className="px-2 py-px bg-green-50 text-green-800 whitespace-pre-wrap">+&nbsp;{part.text}</div>
+        return <div key={i} className="px-2 py-px bg-red-50 text-red-700 line-through whitespace-pre-wrap">−&nbsp;{part.text}</div>
+      })}
+    </div>
+  )
+}
+
 // ─── Cohere-powered Max chat ──────────────────────────────────────────────────
+interface ChangeData {
+  phase:               OutlinePhase
+  oldHtml:             string
+  newHtml:             string
+  newHtmlHighlighted:  string
+  diffParts:           DiffPart[]
+  highlightActive:     boolean
+  view:                'new' | 'original'
+}
+type ChatMsg =
+  | { role: 'user'; text: string }
+  | { role: 'assistant'; text: string; changeData?: ChangeData }
+
 function MaxSidebarChat({
   activePhase, getPhaseHtml, onApplyChange, onClose, onAiInteraction,
 }: {
@@ -1987,7 +2096,7 @@ function MaxSidebarChat({
   onAiInteraction?: (interaction: Omit<AiInteraction, 'index'>) => void
 }) {
   const [input, setInput]               = useState('')
-  const [messages, setMessages]         = useState<{ role: 'user' | 'assistant'; text: string }[]>([])
+  const [messages, setMessages]         = useState<ChatMsg[]>([])
   const [loading, setLoading]           = useState(false)
   const [previousHtml, setPreviousHtml] = useState<string | null>(null)
   const [previousPhase, setPreviousPhase] = useState<OutlinePhase | null>(null)
@@ -2014,7 +2123,6 @@ Regels:
 3. Verklaar NOOIT dat je de tekst niet kunt beoordelen. Beantwoord gewoon de vraag over het onderwerp.
 4. Als je een tekstwijziging uitvoert: herstel NOOIT stilletjes een inhoudelijke fout tenzij de gebruiker die specifieke passage expliciet heeft aangewezen en gevraagd om correctie. Kopieer foutieve passages woordelijk over.
 `
-
     const systemPrompt = `Je bent Max, een onderwijsassistent die helpt bij vragen over en bewerkingen van lesteksten. Je gebruikt alleen echte wetenschappelijke bronnen — verzin NOOIT auteurs, titels of statistieken.
 
 ${errorWarning}
@@ -2055,10 +2163,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
     try {
       const res = await fetch('https://api.cohere.com/v2/chat', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${COHERE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'command-r-08-2024',
           messages: [
@@ -2068,11 +2173,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
           max_tokens: 1500,
         }),
       })
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '')
-        throw new Error(`Cohere ${res.status}: ${errBody}`)
-      }
+      if (!res.ok) { const e = await res.text().catch(() => ''); throw new Error(`Cohere ${res.status}: ${e}`) }
       const data = await res.json()
       const raw: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
 
@@ -2082,58 +2183,100 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
       if (isChange) {
         const newTextMatch = raw.match(/NEW_TEXT:\s*\n?([\s\S]*?)(?=\nSUMMARY:|\nCHANGED:|$)/i)
         const summaryMatch = raw.match(/SUMMARY:\s*\n?([\s\S]*?)$/i)
-        const newPlain     = newTextMatch?.[1]?.trim() ?? plainText
-        const summary      = summaryMatch?.[1]?.trim() ?? 'Tekst aangepast.'
+        const newPlain = newTextMatch?.[1]?.trim() ?? plainText
+        const summary  = summaryMatch?.[1]?.trim() ?? 'Tekst aangepast.'
 
         if (!newPlain || newPlain === plainText) {
           setMessages(prev => [...prev, { role: 'assistant', text: summary || 'Max heeft geen wijziging aangebracht.' }])
-          setLoading(false)
-          return
+          setLoading(false); return
         }
 
-        const newHtml = markdownToHtml(newPlain)
-        setPreviousHtml(currentHtml)
-        setPreviousPhase(activePhase)
-        onApplyChange(activePhase, newHtml)
+        // Build diff and highlighted HTML
+        const diffParts        = lineDiff(plainText, newPlain)
+        const addedLineSet     = new Set(diffParts.filter(p => p.type === 'added' && p.text.trim()).map(p => p.text))
+        const newHtml          = markdownToHtml(newPlain)
+        const newHtmlHighlighted = markdownToHtmlWithHighlight(newPlain, addedLineSet)
+
+        const changeData: ChangeData = {
+          phase: activePhase, oldHtml: currentHtml, newHtml, newHtmlHighlighted,
+          diffParts, highlightActive: true, view: 'new',
+        }
+
+        // Apply highlighted version to editor by default
+        setPreviousHtml(currentHtml); setPreviousPhase(activePhase)
+        onApplyChange(activePhase, newHtmlHighlighted)
+
         const assistantMsg = `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.\n\n${summary}`
-        setMessages(prev => [...prev, { role: 'assistant', text: assistantMsg }])
+        setMessages(prev => [...prev, { role: 'assistant', text: assistantMsg, changeData }])
         onAiInteraction?.({ prompt: q, response: assistantMsg, phase: activePhase, wasChange: true })
       } else {
         const answerMatch = raw.match(/ANSWER:\s*([\s\S]*?)$/i)
-        const answer      = answerMatch?.[1]?.trim() ?? raw.trim()
+        const answer = answerMatch?.[1]?.trim() ?? raw.trim()
         setMessages(prev => [...prev, { role: 'assistant', text: answer }])
         onAiInteraction?.({ prompt: q, response: answer, phase: activePhase ?? 'unknown', wasChange: false })
       }
     } catch (err: any) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        text: `API-fout: ${err?.message ?? 'Onbekende fout'}. Controleer de API-sleutel en probeer opnieuw.`,
-      }])
+      setMessages(prev => [...prev, { role: 'assistant', text: `API-fout: ${err?.message ?? 'Onbekende fout'}. Probeer opnieuw.` }])
     } finally {
       setLoading(false)
     }
+  }
+
+  // Toggle yellow highlight marks in the editor
+  const toggleHighlight = (msgIdx: number) => {
+    setMessages(prev => prev.map((msg, i) => {
+      if (i !== msgIdx || msg.role !== 'assistant' || !msg.changeData) return msg
+      const cd = msg.changeData
+      const newActive = !cd.highlightActive
+      if (cd.view === 'new') onApplyChange(cd.phase, newActive ? cd.newHtmlHighlighted : cd.newHtml)
+      return { ...msg, changeData: { ...cd, highlightActive: newActive } }
+    }))
+  }
+
+  // Swap editor between original (before AI) and new (AI-generated) text
+  const toggleView = (msgIdx: number) => {
+    setMessages(prev => prev.map((msg, i) => {
+      if (i !== msgIdx || msg.role !== 'assistant' || !msg.changeData) return msg
+      const cd = msg.changeData
+      const newView: 'new' | 'original' = cd.view === 'new' ? 'original' : 'new'
+      onApplyChange(cd.phase, newView === 'original' ? cd.oldHtml : (cd.highlightActive ? cd.newHtmlHighlighted : cd.newHtml))
+      return { ...msg, changeData: { ...cd, view: newView } }
+    }))
   }
 
   const handleUndo = () => {
     if (!previousHtml || !previousPhase) return
     onApplyChange(previousPhase, previousHtml)
     setMessages(prev => [...prev, { role: 'assistant', text: `↩️ Wijziging ongedaan gemaakt in de ${PHASE_LABEL[previousPhase]}-fase.` }])
-    setPreviousHtml(null)
-    setPreviousPhase(null)
+    setPreviousHtml(null); setPreviousPhase(null)
   }
 
   const phaseLabel = activePhase ? PHASE_LABEL[activePhase] : null
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-4 py-2 border-b border-gray-100 shrink-0 flex items-start justify-between gap-2">
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-0.5 shrink-0 mt-0.5">
+
+      {/* ── Header: phase name + X ── */}
+      <div className="px-4 py-2.5 border-b border-gray-100 shrink-0 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          {phaseLabel ? (
+            <>
+              <p className="text-xs font-semibold text-gray-900 truncate">Fase: {phaseLabel}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">Stel een vraag of geef een opmerking</p>
+            </>
+          ) : (
+            <p className="text-xs font-semibold text-gray-500">Selecteer een fase om te beginnen</p>
+          )}
+        </div>
+        <button onClick={onClose} title="Fase deselecteren"
+          className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-colors shrink-0">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
       </div>
 
+      {/* ── Message list ── */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {messages.length === 0 && (
           <div className="flex gap-2 items-end">
@@ -2141,12 +2284,12 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
             <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700 max-w-[85%]">
               {phaseLabel
                 ? `Stel je vraag of geef je opmerking over de ${phaseLabel}-fase.`
-                : 'Ik kan helpen bij het evalueren van een tekstgedeelte, door vragen te beantwoorden of de tekst aan te passen op basis van je feedback. Klik op "Selecteer deze fase" om te beginnen!'}
+                : 'Klik op "Selecteer deze fase" in een tekstblok om te beginnen.'}
             </div>
           </div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex gap-2 items-end ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+        {messages.map((msg, idx) => (
+          <div key={idx} className={`flex gap-2 items-end ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
             {msg.role === 'assistant' && (
               <div className="w-6 h-6 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[9px] font-bold">M</div>
             )}
@@ -2155,7 +2298,34 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
                 ? 'bg-[#039B96] text-white rounded-br-none whitespace-pre-wrap'
                 : 'bg-gray-100 text-gray-800 rounded-bl-none'
             }`}>
-              {msg.role === 'user' ? msg.text : <ChatMarkdown text={msg.text} />}
+              {msg.role === 'user' ? msg.text : (
+                <div>
+                  <ChatMarkdown text={msg.text} />
+                  {msg.changeData && (
+                    <div className="mt-2 space-y-1.5">
+                      {/* Inline diff view */}
+                      <DiffView parts={msg.changeData.diffParts} />
+                      {/* Toggle buttons */}
+                      <div className="flex gap-1.5 flex-wrap">
+                        <button onClick={() => toggleHighlight(idx)}
+                          title="Markering in de tekst aan/uitzetten"
+                          className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors ${
+                            msg.changeData.highlightActive
+                              ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
+                              : 'bg-gray-100 border-gray-200 text-gray-500 hover:bg-gray-200'
+                          }`}>
+                          ✦ Markering {msg.changeData.highlightActive ? 'aan' : 'uit'}
+                        </button>
+                        <button onClick={() => toggleView(idx)}
+                          title="Wisselen tussen originele en nieuwe tekst"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
+                          {msg.changeData.view === 'new' ? '← Origineel' : '→ Nieuw'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -2170,6 +2340,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
         <div ref={msgEndRef} />
       </div>
 
+      {/* ── Undo bar ── */}
       {previousHtml !== null && (
         <div className="px-4 py-2 bg-amber-50 border-t border-amber-100 flex items-center justify-between gap-2 shrink-0">
           <p className="text-xs text-amber-700 truncate">Wijziging toegepast</p>
@@ -2183,6 +2354,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
         </div>
       )}
 
+      {/* ── Input area ── */}
       <div className="px-4 py-3 border-t border-gray-100 shrink-0">
         <textarea
           value={input}
