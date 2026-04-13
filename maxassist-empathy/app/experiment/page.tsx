@@ -1306,6 +1306,36 @@ const PHASE_DESCS:  Record<OutlinePhase, string> = {
   afronding:   'Reflecteer en evalueer',
 }
 
+function parsePhaseChunks(text: string): { heading: string; body: string }[] {
+  const lines = text.split('\n')
+  const chunks: { heading: string; body: string }[] = []
+  let current: { heading: string; body: string } | null = null
+  for (const line of lines) {
+    const m = line.match(/^###\s+(.*)$/)
+    if (m) {
+      if (current) chunks.push(current)
+      current = { heading: m[1].trim(), body: '' }
+    } else {
+      if (!current) current = { heading: '', body: '' }
+      current.body += (current.body ? '\n' : '') + line
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+/**
+ * Rebuilds phase markdown from an ordered list of chunks.
+ */
+function buildPhaseText(chunks: { heading: string; body: string }[]): string {
+  return chunks.map(c => {
+    const head = c.heading ? `### ${c.heading}` : ''
+    if (!head) return c.body
+    if (!c.body.trim()) return head
+    return `${head}\n${c.body}`
+  }).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 function LesoverzichtTab({ lessonOutline, setLessonOutline, lesText, setLesText, setPhaseBlocks, lesdoel, loaded, setLoaded, onPrev, onNext }: any) {
   useEffect(() => {
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 4000); return () => clearTimeout(t) }
@@ -1532,6 +1562,8 @@ const PHASE_META: Record<OutlinePhase, { title: string; desc: string }> = {
   verwerking:  { title: 'Verwerking',  desc: 'Laat leerlingen actief aan de slag gaan met de lesstof.' },
   afronding:   { title: 'Afronding',   desc: 'Evalueer het leerproces en rond de les af.' },
 }
+
+
 
 function renderContent(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
