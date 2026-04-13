@@ -2020,54 +2020,57 @@ function markdownToHtmlWithHighlight(text: string, addedLines: Set<string>): str
   const parts: string[] = []
   let i = 0
   const HL = 'style="background-color:#fef9c3;border-radius:3px;padding:0 2px;"'
-  const wl = (content: string, line: string) =>
-    (addedLines.has(line) && line.trim()) ? `<mark ${HL}>${content}</mark>` : content
+  // Wraps INLINE content inside the block — <mark> cannot wrap block elements
+  const wrapInline = (inner: string, line: string) =>
+    (addedLines.has(line) && line.trim()) ? `<mark ${HL}>${inner}</mark>` : inner
 
   while (i < lines.length) {
     const line = lines[i]
-    if (/^###\s*/.test(line)) { parts.push(wl(`<h3>${escHtml(line.replace(/^###\s*/, ''))}</h3>`, line)); i++; continue }
-    if (/^##\s*/.test(line))  { parts.push(wl(`<h2>${escHtml(line.replace(/^##\s*/, ''))}</h2>`, line)); i++; continue }
-    if (/^#\s*/.test(line))   { parts.push(wl(`<h1>${escHtml(line.replace(/^#\s*/, ''))}</h1>`, line)); i++; continue }
+    if (/^###\s*/.test(line)) {
+      const inner = wrapInline(escHtml(line.replace(/^###\s*/, '')), line)
+      parts.push(`<h3>${inner}</h3>`); i++; continue
+    }
+    if (/^##\s*/.test(line)) {
+      const inner = wrapInline(escHtml(line.replace(/^##\s*/, '')), line)
+      parts.push(`<h2>${inner}</h2>`); i++; continue
+    }
+    if (/^#\s*/.test(line)) {
+      const inner = wrapInline(escHtml(line.replace(/^#\s*/, '')), line)
+      parts.push(`<h1>${inner}</h1>`); i++; continue
+    }
     if (line.startsWith('- ') || line.startsWith('* ')) {
       const items: string[] = []
-      const isAdded = addedLines.has(line) && !!line.trim()
       while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
-        items.push(`<li>${inlineFormat(lines[i].slice(2))}</li>`); i++
+        const li = lines[i]
+        const liInner = wrapInline(inlineFormat(li.slice(2)), li)
+        items.push(`<li>${liInner}</li>`); i++
       }
-      const ul = `<ul>${items.join('')}</ul>`
-      parts.push(isAdded ? `<mark ${HL}>${ul}</mark>` : ul); continue
+      parts.push(`<ul>${items.join('')}</ul>`); continue
     }
     if (/^\d+\. /.test(line)) {
       const items: string[] = []
-      const isAdded = addedLines.has(line) && !!line.trim()
       while (i < lines.length && /^\d+\. /.test(lines[i])) {
-        items.push(`<li>${inlineFormat(lines[i].replace(/^\d+\. /, ''))}</li>`); i++
+        const li = lines[i]
+        const liInner = wrapInline(inlineFormat(li.replace(/^\d+\. /, '')), li)
+        items.push(`<li>${liInner}</li>`); i++
       }
-      const ol = `<ol>${items.join('')}</ol>`
-      parts.push(isAdded ? `<mark ${HL}>${ol}</mark>` : ol); continue
+      parts.push(`<ol>${items.join('')}</ol>`); continue
     }
     if (!line.trim()) { parts.push('<p><br></p>'); i++; continue }
-    parts.push(wl(`<p>${inlineFormat(line)}</p>`, line)); i++
+    parts.push(`<p>${wrapInline(inlineFormat(line), line)}</p>`); i++
   }
   return parts.join('')
 }
 
-function DiffView({ parts }: { parts: DiffPart[] }) {
-  const hasChanges = parts.some(p => p.type !== 'equal')
-  if (!hasChanges) return null
-  const compact = compactDiff(parts, 1)
+// Compact change summary — just counts, no raw text dump
+function ChangeSummary({ parts }: { parts: DiffPart[] }) {
+  const added   = parts.filter(p => p.type === 'added'   && p.text.trim()).length
+  const removed = parts.filter(p => p.type === 'removed' && p.text.trim()).length
+  if (added === 0 && removed === 0) return null
   return (
-    <div className="mt-2 rounded-lg border border-gray-200 bg-white overflow-auto max-h-36 text-[11px] font-mono leading-relaxed">
-      {compact.map((part, i) => {
-        if (part.type === 'equal' && part.text === '…')
-          return <div key={i} className="px-2 py-px text-gray-400 select-none">…</div>
-        if (part.type === 'equal' && !part.text.trim()) return null
-        if (part.type === 'equal')
-          return <div key={i} className="px-2 py-px text-gray-400 whitespace-pre-wrap">{part.text}</div>
-        if (part.type === 'added')
-          return <div key={i} className="px-2 py-px bg-green-50 text-green-800 whitespace-pre-wrap">+&nbsp;{part.text}</div>
-        return <div key={i} className="px-2 py-px bg-red-50 text-red-700 line-through whitespace-pre-wrap">−&nbsp;{part.text}</div>
-      })}
+    <div className="mt-1.5 flex gap-1.5 flex-wrap">
+      {added   > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">+{added} {added === 1 ? 'regel' : 'regels'} toegevoegd</span>}
+      {removed > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700">−{removed} {removed === 1 ? 'regel' : 'regels'} verwijderd</span>}
     </div>
   )
 }
@@ -2261,8 +2264,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
         <div className="min-w-0">
           {phaseLabel ? (
             <>
-              <p className="text-xs font-semibold text-gray-900 truncate">Fase: {phaseLabel}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">Stel een vraag of geef een opmerking</p>
+              <p className="text-xs font-semibold text-gray-900 truncate">Geselecteerde fase: {phaseLabel}</p>
             </>
           ) : (
             <p className="text-xs font-semibold text-gray-500">Selecteer een fase om te beginnen</p>
@@ -2303,8 +2305,8 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
                   <ChatMarkdown text={msg.text} />
                   {msg.changeData && (
                     <div className="mt-2 space-y-1.5">
-                      {/* Inline diff view */}
-                      <DiffView parts={msg.changeData.diffParts} />
+                      {/* Change summary */}
+                      <ChangeSummary parts={msg.changeData.diffParts} />
                       {/* Toggle buttons */}
                       <div className="flex gap-1.5 flex-wrap">
                         <button onClick={() => toggleHighlight(idx)}
