@@ -424,8 +424,11 @@ function buildReadingAnalysis(
     ? 'Menselijk'
     : 'AIGegenereerd'
 
-  // Two weakest read blocks (sorted ascending by readScore)
+  // Two weakest read blocks — only phases that have NOT yet reached Duidelijk.
+  // This means a hint only disappears when the phase genuinely reaches the top
+  // tier, not just because another phase temporarily scores slightly higher.
   const weakestReadLabels = [...sections]
+    .filter(s => s.readTier !== 'Duidelijk')
     .sort((a, b) => a.readScore - b.readScore)
     .slice(0, 2)
     .map(s => s.label)
@@ -776,6 +779,7 @@ function ExperimentPage() {
       const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
         ? 'Menselijk' : 'AIGegenereerd'
       const weakestReadLabels = [...mergedSections]
+        .filter(s => s.readTier !== 'Duidelijk')
         .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
       const weakestEditLabels = [...mergedSections]
         .sort((a, b) => {
@@ -1771,7 +1775,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
               onUpdate={b => updatePhase(phase, b)}
               visible={visiblePhases.has(phase)}
               onToggle={() => togglePhase(phase)}
-              onManualInput={(html: string) => onManualInput(phase, html)}
+              onManualInput={(html: string) => { onManualInput(phase, html); handleManualEdit() }}
               onOpenMaxPanel={() => setActivePhase(phase)} />
           ))}
         </div>
