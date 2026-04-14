@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
 import {
   EXPERIMENT_TEXT, LESSON_LESDOEL
 } from '@/lib/experiment-content'
@@ -717,8 +716,12 @@ function ExperimentPage() {
   const [submitting, setSubmitting]         = useState(false)
   const [submitted, setSubmitted]           = useState(false)
   const [submitError, setSubmitError]       = useState<string | null>(null)
-  const [participantId, setParticipantId]   = useState('unknown')
-  const [condition, setCondition]           = useState('student')
+
+  const participantIdRef = React.useRef('unknown')
+  const conditionRef     = React.useRef('student')
+  // Mirror in state so conditional rendering (NudgeBox etc.) re-renders when they change
+  const [participantId, setParticipantId] = useState('unknown')
+  const [condition, setCondition]         = useState('baseline')
 
   // ── New experiment measurements ──────────────────────────────────────────
   const [aiInteractions, setAiInteractions]   = useState<AiInteraction[]>([])
@@ -749,9 +752,15 @@ function ExperimentPage() {
   const [manualEditCount, setManualEditCount] = useState(0)
 
   useEffect(() => {
-    setParticipantId(searchParams.get('pid') || 'unknown')
-    // This deployment is always the student condition
-    setCondition('student')
+    const p   = new URLSearchParams(window.location.search)
+    const pid = p.get('uid') || p.get('pid') || 'unknown'
+    const cnd = p.get('cond') || p.get('condition') || 'baseline'
+    // Write to refs first — submit handlers read from here, never stale
+    participantIdRef.current = pid
+    conditionRef.current     = cnd
+    // Also update state so NudgeBox and any conditional rendering reacts
+    setParticipantId(pid)
+    setCondition(cnd)
   }, [])
 
   // Reading analysis state — lifted here so it survives tab switches.
@@ -860,7 +869,7 @@ function ExperimentPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          participant_id: participantId,
+          participant_id: participantIdRef.current,
           levenshtein_distance: lev,
           error_correction_rate: rate,
           errors_corrected: corrected.join(','),
@@ -1640,6 +1649,10 @@ function stripHtmlForEdit(html: string): string {
     .replace(/\n{3,}/g, '\n\n').trim()
 }
 
+function stripMarks(html: string): string {
+  return html.replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, '$1')
+}
+
 function markdownToHtml(text: string): string {
   const lines = text.split('\n')
   const parts: string[] = []
@@ -1904,6 +1917,20 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
     updatePhase(phase, [newHtml])
   }
 
+  /** Strip <mark> highlights from every phase editor and sync state before leaving the tab */
+  const clearAllHighlights = () => {
+    for (const phase of phases) {
+      const el = editorRefs[phase].current
+      if (!el) continue
+      const cleaned = stripMarks(el.innerHTML)
+      if (cleaned !== el.innerHTML) {
+        el.innerHTML = cleaned
+        updatePhase(phase, [cleaned])
+      }
+    }
+  }
+
+
   return (
     <div className="flex h-full overflow-hidden relative">
       <MaxLoader visible={!loaded} message="Max genereert de volledige lesinhoud voor je. Pak vast een kopje koffie! ☕" />
@@ -1935,8 +1962,8 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
         </div>
 
         <div className="flex justify-between mt-8">
-          <Btn variant="outline" onClick={onPrev}><ChevLeft /> Vorige</Btn>
-          <Btn variant="default" onClick={onNext}>Volgende <ChevRight /></Btn>
+          <Btn variant="outline" onClick={() => { clearAllHighlights(); onPrev() }}><ChevLeft /> Vorige</Btn>
+          <Btn variant="default" onClick={() => { clearAllHighlights(); onNext() }}>Volgende <ChevRight /></Btn>
         </div>
       </div>
 
