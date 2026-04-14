@@ -1649,17 +1649,7 @@ function stripHtmlForEdit(html: string): string {
 }
 
 function stripMarks(html: string): string {
-  // Use the browser's own parser instead of regex — regex can misfire when a
-  // <mark> is nested inside a block element (e.g. <h2>) that contentEditable
-  // has restructured, causing the heading tags to be swallowed as part of the
-  // captured group.  replaceWith(...childNodes) surgically unwraps each <mark>
-  // while leaving every surrounding element (headings, paragraphs, lists) intact.
-  const tmp = document.createElement('div')
-  tmp.innerHTML = html
-  tmp.querySelectorAll('mark').forEach(mark => {
-    mark.replaceWith(...Array.from(mark.childNodes))
-  })
-  return tmp.innerHTML
+  return html.replace(/<mark[^>]*>([\s\S]*?)<\/mark>/gi, '$1')
 }
 
 function markdownToHtml(text: string): string {
@@ -1930,22 +1920,16 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
   /** Strip <mark> highlights from every phase editor and sync state before leaving the tab */
   const clearAllHighlights = React.useCallback(() => {
-    const updates: Partial<Record<OutlinePhase, string[]>> = {}
     for (const phase of phases) {
       const el = editorRefs[phase].current
       if (!el) continue
       const cleaned = stripMarks(el.innerHTML)
       if (cleaned !== el.innerHTML) {
         el.innerHTML = cleaned
-        updates[phase] = [cleaned]
+        updatePhase(phase, [cleaned])
       }
     }
-    // Functional update ensures we never overwrite other phases current content
-    // even when multiple phases had highlights simultaneously.
-    if (Object.keys(updates).length > 0) {
-      setPhaseBlocks((prev: any) => ({ ...prev, ...updates }))
-    }
-  }, [editorRefs, setPhaseBlocks]) // setPhaseBlocks is a stable React setter
+  }, [editorRefs]) // editorRefs is memoised so this callback is stable too
 
 
   return (
