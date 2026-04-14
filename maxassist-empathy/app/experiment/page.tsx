@@ -2135,10 +2135,15 @@ FORMAAT BIJ TEKSTWIJZIGING (CHANGED:true):
 ======================================================
 CHANGED: true
 NEW_TEXT:
-[schrijf de VOLLEDIGE tekst van de fase opnieuw met ALLE alineas en koppen.
+[schrijf de VOLLEDIGE tekst van de fase opnieuw met ALLE alinea's en koppen.
 Gebruik dezelfde markdown als het origineel: ## voor fase-titels, ### voor subtitels, - voor lijstitems, **vet** voor nadruk.
-Verander ALLEEN wat de gebruiker heeft gevraagd. Kopieer de rest — inclusief eventuele fouten — WOORDELIJK.
-Maak de gevraagde aanpassing substantieel en zichtbaar.]
+
+STRIKTE REGEL — WIJZIG ALLEEN WAT GEVRAAGD IS:
+• Kopieer ELKE zin, alinea en kop die NIET wordt gevraagd om aan te passen WOORDELIJK over, inclusief eventuele fouten.
+• Als de gebruiker vraagt om één alinea aan te passen, mogen ALLE andere alinea's NIET worden gewijzigd — zelfs niet voor stijl, formulering, lengte of verbetering.
+• Twijfel je of iets ook gewijzigd moet worden? → Kopieer het dan woordelijk.
+• Doe GEEN extra verbeteringen, herschrijvingen of stijlaanpassingen buiten het gevraagde.
+Maak de gevraagde aanpassing duidelijk en substantieel zichtbaar.]
 SUMMARY:
 [een of twee zinnen: wat gewijzigd en waarom, met echte bronnen indien van toepassing]
 
