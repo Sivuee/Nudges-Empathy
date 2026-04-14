@@ -857,11 +857,11 @@ function ExperimentPage() {
       phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
     ) / 1000
     try {
-      const res = await fetch('https://formspree.io/f/xojpoypd', {
+      const res = await fetch('https://formspree.io/f/mqedwepd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          participant_id: participantId, condition,
+          participant_id: participantId,
           levenshtein_distance: lev,
           error_correction_rate: rate,
           errors_corrected: corrected.join(','),
@@ -2322,7 +2322,7 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
                         <button onClick={() => toggleView(idx)}
                           title="Wisselen tussen originele en nieuwe tekst"
                           className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border border-gray-200 bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors">
-                          {msg.changeData.view === 'new' ? '← Origineel' : '→ Nieuw'}
+                          {msg.changeData.view === 'new' ? 'Nieuw' : 'Origineel'}
                         </button>
                       </div>
                     </div>
