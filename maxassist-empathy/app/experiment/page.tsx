@@ -749,8 +749,7 @@ function ExperimentPage() {
   const [manualEditCount, setManualEditCount] = useState(0)
 
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search)
-    setParticipantId(p.get('pid') || 'unknown')
+    setParticipantId(searchParams.get('pid') || 'unknown')
     // This deployment is always the student condition
     setCondition('student')
   }, [])
