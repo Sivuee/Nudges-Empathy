@@ -2062,19 +2062,6 @@ function markdownToHtmlWithHighlight(text: string, addedLines: Set<string>): str
   return parts.join('')
 }
 
-// Compact change summary — just counts, no raw text dump
-function ChangeSummary({ parts }: { parts: DiffPart[] }) {
-  const added   = parts.filter(p => p.type === 'added'   && p.text.trim()).length
-  const removed = parts.filter(p => p.type === 'removed' && p.text.trim()).length
-  if (added === 0 && removed === 0) return null
-  return (
-    <div className="mt-1.5 flex gap-1.5 flex-wrap">
-      {added   > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">+{added} {added === 1 ? 'regel' : 'regels'} toegevoegd</span>}
-      {removed > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700">−{removed} {removed === 1 ? 'regel' : 'regels'} verwijderd</span>}
-    </div>
-  )
-}
-
 // ─── Cohere-powered Max chat ──────────────────────────────────────────────────
 interface ChangeData {
   phase:               OutlinePhase
@@ -2084,6 +2071,7 @@ interface ChangeData {
   diffParts:           DiffPart[]
   highlightActive:     boolean
   view:                'new' | 'original'
+  summary:             string
 }
 type ChatMsg =
   | { role: 'user'; text: string }
@@ -2203,13 +2191,14 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
         const changeData: ChangeData = {
           phase: activePhase, oldHtml: currentHtml, newHtml, newHtmlHighlighted,
           diffParts, highlightActive: true, view: 'new',
+          summary,
         }
 
         // Apply highlighted version to editor by default
         setPreviousHtml(currentHtml); setPreviousPhase(activePhase)
         onApplyChange(activePhase, newHtmlHighlighted)
 
-        const assistantMsg = `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.\n\n${summary}`
+        const assistantMsg = `Wijziging toegepast in de ${PHASE_LABEL[activePhase]}-fase.`
         setMessages(prev => [...prev, { role: 'assistant', text: assistantMsg, changeData }])
         onAiInteraction?.({ prompt: q, response: assistantMsg, phase: activePhase, wasChange: true })
       } else {
@@ -2303,10 +2292,17 @@ De tekst betreft fase "${PHASE_LABEL[activePhase]}" van een les over formatieve 
               {msg.role === 'user' ? msg.text : (
                 <div>
                   <ChatMarkdown text={msg.text} />
-                  {msg.changeData && (
-                    <div className="mt-2 space-y-1.5">
-                      {/* Change summary */}
-                      <ChangeSummary parts={msg.changeData.diffParts} />
+                    {msg.changeData && (
+                      <div className="mt-2 space-y-1.5">
+                        {/* AI-generated bullet summary */}
+                        <ul className="space-y-0.5">
+                          {msg.changeData.summary.split(/\n+/).filter(Boolean).map((line, li) => (
+                            <li key={li} className="flex gap-1.5 text-[11px] text-gray-600 leading-snug">
+                              <span className="text-[#E13AA1] shrink-0 mt-px">•</span>
+                              <span>{line.replace(/^[-•*]\s*/, '')}</span>
+                            </li>
+                          ))}
+                        </ul>
                       {/* Toggle buttons */}
                       <div className="flex gap-1.5 flex-wrap">
                         <button onClick={() => toggleHighlight(idx)}
