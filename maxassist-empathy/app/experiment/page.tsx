@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+// NOTE: useSearchParams removed — participant ID is read directly from window.location.search
 import {
   EXPERIMENT_TEXT, LESSON_LESDOEL
 } from '@/lib/experiment-content'
@@ -622,8 +623,6 @@ function EmpathyChatPanel({ lesdoel, analysis }: { lesdoel: string; analysis: Re
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 function ExperimentPage() {
-
-  const searchParams = useSearchParams()
 
   const [appStep, setAppStep]           = useState<AppStep>('library')
   // Top-level tab: details | authoring (like original Lesdetails / Auteursomgeving)
@@ -1885,10 +1884,12 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
   const instructieRef = React.useRef<HTMLDivElement>(null)
   const verwerkingRef = React.useRef<HTMLDivElement>(null)
   const afrondingRef  = React.useRef<HTMLDivElement>(null)
-  const editorRefs: Record<OutlinePhase, React.RefObject<HTMLDivElement>> = {
+  // useMemo keeps the same object reference across renders so that
+  // clearAllHighlights (and any other closures) never capture a stale copy.
+  const editorRefs = React.useMemo<Record<OutlinePhase, React.RefObject<HTMLDivElement>>>(() => ({
     introductie: introRef, instructie: instructieRef,
     verwerking: verwerkingRef, afronding: afrondingRef,
-  }
+  }), []) // refs are stable — empty dep array is intentional
 
   const updatePhase = (phase: OutlinePhase, blocks: string[]) => {
     const next = { ...phaseBlocks, [phase]: blocks }
@@ -1918,7 +1919,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
   }
 
   /** Strip <mark> highlights from every phase editor and sync state before leaving the tab */
-  const clearAllHighlights = () => {
+  const clearAllHighlights = React.useCallback(() => {
     for (const phase of phases) {
       const el = editorRefs[phase].current
       if (!el) continue
@@ -1928,7 +1929,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
         updatePhase(phase, [cleaned])
       }
     }
-  }
+  }, [editorRefs]) // editorRefs is memoised so this callback is stable too
 
 
   return (
