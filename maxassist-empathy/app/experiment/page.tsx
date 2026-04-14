@@ -720,7 +720,7 @@ function ExperimentPage() {
   const conditionRef     = React.useRef('student')
   // Mirror in state so conditional rendering (NudgeBox etc.) re-renders when they change
   const [participantId, setParticipantId] = useState('unknown')
-  const [condition, setCondition]         = useState('baseline')
+  const [condition, setCondition] = useState('student') 
 
   // ── New experiment measurements ──────────────────────────────────────────
   const [aiInteractions, setAiInteractions]   = useState<AiInteraction[]>([])
@@ -753,7 +753,7 @@ function ExperimentPage() {
   useEffect(() => {
     const p   = new URLSearchParams(window.location.search)
     const pid = p.get('uid') || p.get('pid') || 'unknown'
-    const cnd = p.get('cond') || p.get('condition') || 'baseline'
+    const cnd = p.get('cond') || p.get('condition') || 'student'
     // Write to refs first — submit handlers read from here, never stale
     participantIdRef.current = pid
     conditionRef.current     = cnd
@@ -864,7 +864,7 @@ function ExperimentPage() {
       phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
     ) / 1000
     try {
-      const res = await fetch('https://formspree.io/f/mqedwepd', {
+      const res = await fetch('https://formspree.io/f/xojpoypd', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
