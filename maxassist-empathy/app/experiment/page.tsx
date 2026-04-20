@@ -1066,7 +1066,7 @@ function ExperimentPage() {
                       manualEditTexts={manualEditTexts} onManualInput={handleManualInput}
                       nextLoading={lesNextLoading}
                       onPrev={() => { handleLesTabLeave(); setActiveTab('lesoverzicht') }}
-                      onNext={() => {handleLesNext}} />
+                      onNext={handleLesNext} />
                   )}
                   {activeTab === 'voorvertoning' && (
                     <VoorvertoningTab lesText={lesText} lesdoel={activeLesdoel} condition={condition}
