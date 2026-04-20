@@ -713,8 +713,8 @@ function ExperimentPage() {
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [shareTab, setShareTab]             = useState<'students' | 'colleagues'>('students')
   const [submitting, setSubmitting]         = useState(false)
-  const [lesNextLoading, setLesNextLoading] = useState(false)
   const [submitted, setSubmitted]           = useState(false)
+  const [lesNextLoading, setLesNextLoading]   = useState(false)
   const [submitError, setSubmitError]       = useState<string | null>(null)
 
   const participantIdRef = React.useRef('unknown')
@@ -763,89 +763,6 @@ function ExperimentPage() {
     setCondition(cnd)
   }, [])
 
-  const buildPayload = React.useCallback((extra: {[k: string]: unknown} = {}) => {
-    const phaseEditRatios: Record<string, number> = {}
-    const phases: OutlinePhase[] = ['introductie', 'instructie', 'verwerking', 'afronding']
-    for (const phase of phases) {
-      const original = ORIGINAL_PHASE_TEXT[phase] ?? ''
-      const outlineKey = phase
-      const currentText = manualEditTexts[outlineKey] !== null && manualEditTexts[outlineKey] !== undefined
-        ? stripHtmlForEdit(manualEditTexts[outlineKey] as string)
-        : (phaseBlocks[phase] ?? []).join('\n')
-      const dist = simpleLevenshtein(
-        currentText.replace(/\s+/g, ' ').trim(),
-        original.replace(/\s+/g, ' ').trim()
-      )
-      phaseEditRatios[phase] = original.length > 0 ? Math.round((dist / original.length) * 1000) / 1000 : 0
-    }
-    const overallEditRatio = Math.round(
-      phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
-    ) / 1000
-    const plainText = stripHtml(lesText)
-    const lev = levenshtein(plainText, EXPERIMENT_TEXT)
-    const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
-    const additionalMs = lesEditStartRef.current !== null ? Date.now() - lesEditStartRef.current : 0
-    const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
-    return JSON.stringify({
-      participant_id:        participantIdRef.current,
-      levenshtein_distance:  lev,
-      error_correction_rate: rate,
-      errors_corrected:      corrected.join(','),
-      errors_uncorrected:    uncorrected.join(','),
-      errors_undetectable:   undetectable.join(','),
-      final_text:            plainText,
-      submitted_at:          new Date().toISOString(),
-      lesonderwerp:          onderwerp,
-      doelgroep:             doelgroepStr,
-      lesdoel_text:          lesdoel,
-      lesduur_min:           lesduur ?? null,
-      les_edit_time_sec:     finalLesEditSec,
-      ai_prompt_count:       aiInteractions.length,
-      ai_prompts:            aiInteractions.map(i => (i as AiInteraction).prompt).join(' | '),
-      ai_interactions:       JSON.stringify(aiInteractions),
-      manual_edit_count:     manualEditCount,
-      simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
-      simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
-      simon_read_score: readingAnalysis?.averageReadScore ?? 0,
-      // Edit ratio per phase (0 = unchanged, 1 = fully rewritten)
-      edit_ratio_introductie: phaseEditRatios['introductie'],
-      edit_ratio_instructie:  phaseEditRatios['instructie'],
-      edit_ratio_verwerking:  phaseEditRatios['verwerking'],
-      edit_ratio_afronding:   phaseEditRatios['afronding'],
-      edit_ratio_overall:     overallEditRatio,
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesText, onderwerp, lesdoel, lesduur, aiInteractions, manualEditCount])
-
-  const sendSnapshot = React.useCallback((step: string) => {
-    return fetch('https://formspree.io/f/xojpoypd', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    buildPayload({ submission_type: 'intermediate', step }),
-    }).catch(() => {})
-  }, [buildPayload])
-
-  const handleLesNext = React.useCallback(async () => {
-    handleLesTabLeave()
-    setLesNextLoading(true)
-    await new Promise(r => setTimeout(r, 0))
-    await sendSnapshot('les')
-    setLesNextLoading(false)
-    setActiveTab('voorvertoning')
-  }, [handleLesTabLeave, sendSnapshot])
-
-  useEffect(() => {
-    const handleUnload = () => {
-      if (appStep === 'library') return
-      const blob = new Blob(
-        [buildPayload({ submission_type: 'unload', step: activeTab })],
-        { type: 'application/json' },
-      )
-      navigator.sendBeacon('https://formspree.io/f/xojpoypd', blob)
-    }
-    window.addEventListener('beforeunload', handleUnload)
-    return () => window.removeEventListener('beforeunload', handleUnload)
-  }, [buildPayload, appStep, activeTab])
 
   // Reading analysis state — lifted here so it survives tab switches.
   // stableSetAnalysis merges incoming data by keeping the highest read score
@@ -897,6 +814,65 @@ function ExperimentPage() {
   const subSubLevel  = subLevel?.subSubLevels?.find((s: any) => s.id === educatieSpecifiekeRichting)
   const doelgroepStr = educatieNiveau === 'Anders' ? (customEducation || 'Anders')
     : [mainLevel?.label, subLevel?.label, subSubLevel?.label].filter(Boolean).join(' - ')
+
+  const buildPayload = React.useCallback((extra: {[k: string]: unknown} = {}) => {
+    const plainText = stripHtml(lesText)
+    const lev = levenshtein(plainText, EXPERIMENT_TEXT)
+    const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
+    const additionalMs = lesEditStartRef.current !== null ? Date.now() - lesEditStartRef.current : 0
+    const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
+    return JSON.stringify({
+      participant_id:        participantIdRef.current,
+      levenshtein_distance:  lev,
+      error_correction_rate: rate,
+      errors_corrected:      corrected.join(','),
+      errors_uncorrected:    uncorrected.join(','),
+      errors_undetectable:   undetectable.join(','),
+      final_text:            plainText,
+      submitted_at:          new Date().toISOString(),
+      lesonderwerp:          onderwerp,
+      doelgroep:             doelgroepStr,
+      lesdoel_text:          lesdoel,
+      lesduur_min:           lesduur ?? null,
+      les_edit_time_sec:     finalLesEditSec,
+      ai_prompt_count:       aiInteractions.length,
+      ai_prompts:            aiInteractions.map(i => (i as AiInteraction).prompt).join(' | '),
+      ai_interactions:       JSON.stringify(aiInteractions),
+      manual_edit_count:     manualEditCount,
+      ...extra,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesText, onderwerp, lesdoel, lesduur, aiInteractions, manualEditCount])
+
+  const sendSnapshot = React.useCallback((step: string) => {
+    return fetch('https://formspree.io/f/xojpoypd', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    buildPayload({ submission_type: 'intermediate', step }),
+    }).catch(() => {})
+  }, [buildPayload])
+
+  const handleLesNext = React.useCallback(async () => {
+    handleLesTabLeave()
+    setLesNextLoading(true)
+    await new Promise(r => setTimeout(r, 0))
+    await sendSnapshot('les')
+    setLesNextLoading(false)
+    setActiveTab('voorvertoning')
+  }, [handleLesTabLeave, sendSnapshot])
+
+  useEffect(() => {
+    const handleUnload = () => {
+      if (appStep === 'library') return
+      const blob = new Blob(
+        [buildPayload({ submission_type: 'unload', step: activeTab })],
+        { type: 'application/json' },
+      )
+      navigator.sendBeacon('https://formspree.io/f/xojpoypd', blob)
+    }
+    window.addEventListener('beforeunload', handleUnload)
+    return () => window.removeEventListener('beforeunload', handleUnload)
+  }, [buildPayload, appStep, activeTab])
 
   const wordCount      = onderwerp.trim().split(/\s+/).filter(Boolean).length
   const isDetailsValid = !!educatieNiveau && wordCount >= 3 && lesdoel.trim().length > 0
@@ -1928,7 +1904,7 @@ const PhaseCard = React.forwardRef<HTMLDivElement, {
 })
 
 function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition, onLesTabEnter, onAiInteraction, onLesTabLeave, onManualEditCount,
-  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis, nextLoading,
+  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
   manualEditTexts, onManualInput, onPrev, onNext }: any) {
   useEffect(() => {
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 7000); return () => clearTimeout(t) }
