@@ -764,6 +764,23 @@ function ExperimentPage() {
   }, [])
 
   const buildPayload = React.useCallback((extra: {[k: string]: unknown} = {}) => {
+    const phaseEditRatios: Record<string, number> = {}
+    const phases: OutlinePhase[] = ['introductie', 'instructie', 'verwerking', 'afronding']
+    for (const phase of phases) {
+      const original = ORIGINAL_PHASE_TEXT[phase] ?? ''
+      const outlineKey = phase
+      const currentText = manualEditTexts[outlineKey] !== null && manualEditTexts[outlineKey] !== undefined
+        ? stripHtmlForEdit(manualEditTexts[outlineKey] as string)
+        : (phaseBlocks[phase] ?? []).join('\n')
+      const dist = simpleLevenshtein(
+        currentText.replace(/\s+/g, ' ').trim(),
+        original.replace(/\s+/g, ' ').trim()
+      )
+      phaseEditRatios[phase] = original.length > 0 ? Math.round((dist / original.length) * 1000) / 1000 : 0
+    }
+    const overallEditRatio = Math.round(
+      phases.reduce((s, p) => s + phaseEditRatios[p], 0) / phases.length * 1000
+    ) / 1000
     const plainText = stripHtml(lesText)
     const lev = levenshtein(plainText, EXPERIMENT_TEXT)
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
@@ -787,13 +804,21 @@ function ExperimentPage() {
       ai_prompts:            aiInteractions.map(i => (i as AiInteraction).prompt).join(' | '),
       ai_interactions:       JSON.stringify(aiInteractions),
       manual_edit_count:     manualEditCount,
-      ...extra,
+      simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
+      simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
+      simon_read_score: readingAnalysis?.averageReadScore ?? 0,
+      // Edit ratio per phase (0 = unchanged, 1 = fully rewritten)
+      edit_ratio_introductie: phaseEditRatios['introductie'],
+      edit_ratio_instructie:  phaseEditRatios['instructie'],
+      edit_ratio_verwerking:  phaseEditRatios['verwerking'],
+      edit_ratio_afronding:   phaseEditRatios['afronding'],
+      edit_ratio_overall:     overallEditRatio,
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesText, onderwerp, lesdoel, lesduur, aiInteractions, manualEditCount])
 
   const sendSnapshot = React.useCallback((step: string) => {
-    return fetch('https://formspree.io/f/mvzvdwna', {
+    return fetch('https://formspree.io/f/xojpoypd', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    buildPayload({ submission_type: 'intermediate', step }),
@@ -816,7 +841,7 @@ function ExperimentPage() {
         [buildPayload({ submission_type: 'unload', step: activeTab })],
         { type: 'application/json' },
       )
-      navigator.sendBeacon('https://formspree.io/f/mvzvdwna', blob)
+      navigator.sendBeacon('https://formspree.io/f/xojpoypd', blob)
     }
     window.addEventListener('beforeunload', handleUnload)
     return () => window.removeEventListener('beforeunload', handleUnload)
