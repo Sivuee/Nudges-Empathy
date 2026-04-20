@@ -713,6 +713,7 @@ function ExperimentPage() {
   const [shareModalOpen, setShareModalOpen] = useState(false)
   const [shareTab, setShareTab]             = useState<'students' | 'colleagues'>('students')
   const [submitting, setSubmitting]         = useState(false)
+  const [lesNextLoading, setLesNextLoading] = useState(false)
   const [submitted, setSubmitted]           = useState(false)
   const [submitError, setSubmitError]       = useState<string | null>(null)
 
@@ -761,6 +762,65 @@ function ExperimentPage() {
     setParticipantId(pid)
     setCondition(cnd)
   }, [])
+
+  const buildPayload = React.useCallback((extra: {[k: string]: unknown} = {}) => {
+    const plainText = stripHtml(lesText)
+    const lev = levenshtein(plainText, EXPERIMENT_TEXT)
+    const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
+    const additionalMs = lesEditStartRef.current !== null ? Date.now() - lesEditStartRef.current : 0
+    const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
+    return JSON.stringify({
+      participant_id:        participantIdRef.current,
+      levenshtein_distance:  lev,
+      error_correction_rate: rate,
+      errors_corrected:      corrected.join(','),
+      errors_uncorrected:    uncorrected.join(','),
+      errors_undetectable:   undetectable.join(','),
+      final_text:            plainText,
+      submitted_at:          new Date().toISOString(),
+      lesonderwerp:          onderwerp,
+      doelgroep:             doelgroepStr,
+      lesdoel_text:          lesdoel,
+      lesduur_min:           lesduur ?? null,
+      les_edit_time_sec:     finalLesEditSec,
+      ai_prompt_count:       aiInteractions.length,
+      ai_prompts:            aiInteractions.map(i => (i as AiInteraction).prompt).join(' | '),
+      ai_interactions:       JSON.stringify(aiInteractions),
+      manual_edit_count:     manualEditCount,
+      ...extra,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesText, onderwerp, lesdoel, lesduur, aiInteractions, manualEditCount])
+
+  const sendSnapshot = React.useCallback((step: string) => {
+    return fetch('https://formspree.io/f/mvzvdwna', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    buildPayload({ submission_type: 'intermediate', step }),
+    }).catch(() => {})
+  }, [buildPayload])
+
+  const handleLesNext = React.useCallback(async () => {
+    handleLesTabLeave()
+    setLesNextLoading(true)
+    await new Promise(r => setTimeout(r, 0))
+    await sendSnapshot('les')
+    setLesNextLoading(false)
+    setActiveTab('voorvertoning')
+  }, [handleLesTabLeave, sendSnapshot])
+
+  useEffect(() => {
+    const handleUnload = () => {
+      if (appStep === 'library') return
+      const blob = new Blob(
+        [buildPayload({ submission_type: 'unload', step: activeTab })],
+        { type: 'application/json' },
+      )
+      navigator.sendBeacon('https://formspree.io/f/mvzvdwna', blob)
+    }
+    window.addEventListener('beforeunload', handleUnload)
+    return () => window.removeEventListener('beforeunload', handleUnload)
+  }, [buildPayload, appStep, activeTab])
 
   // Reading analysis state — lifted here so it survives tab switches.
   // stableSetAnalysis merges incoming data by keeping the highest read score
@@ -1004,8 +1064,9 @@ function ExperimentPage() {
                       trackerMounted={trackerMounted} setTrackerMounted={setTrackerMounted}
                       readingAnalysis={readingAnalysis} onReadingAnalysis={stableSetAnalysis}
                       manualEditTexts={manualEditTexts} onManualInput={handleManualInput}
+                      nextLoading={lesNextLoading}
                       onPrev={() => { handleLesTabLeave(); setActiveTab('lesoverzicht') }}
-                      onNext={() => { handleLesTabLeave(); setActiveTab('voorvertoning') }} />
+                      onNext={() => {handleLesNext}} />
                   )}
                   {activeTab === 'voorvertoning' && (
                     <VoorvertoningTab lesText={lesText} lesdoel={activeLesdoel} condition={condition}
@@ -1842,7 +1903,7 @@ const PhaseCard = React.forwardRef<HTMLDivElement, {
 })
 
 function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition, onLesTabEnter, onAiInteraction, onLesTabLeave, onManualEditCount,
-  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
+  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis, nextLoading,
   manualEditTexts, onManualInput, onPrev, onNext }: any) {
   useEffect(() => {
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 7000); return () => clearTimeout(t) }
@@ -1964,7 +2025,12 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
 
         <div className="flex justify-between mt-8">
           <Btn variant="outline" onClick={() => { clearAllHighlights(); onPrev() }}><ChevLeft /> Vorige</Btn>
-          <Btn variant="default" onClick={() => { clearAllHighlights(); onNext() }}>Volgende <ChevRight /></Btn>
+          <Btn variant="default" onClick={() => { clearAllHighlights(); onNext() }} disabled={nextLoading}>
+            {nextLoading
+              ? <svg className="animate-spin w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12 6.477 12 12h-4z"/></svg>
+              : null}
+            {nextLoading ? 'Bezig...' : <><span>Volgende</span><ChevRight /></>}
+          </Btn>
         </div>
       </div>
 
