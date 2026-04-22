@@ -1905,7 +1905,7 @@ const PhaseCard = React.forwardRef<HTMLDivElement, {
 
 function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition, onLesTabEnter, onAiInteraction, onLesTabLeave, onManualEditCount,
   loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
-  manualEditTexts, onManualInput, onPrev, onNext }: any) {
+  manualEditTexts, onManualInput, onPrev, onNext, nextLoading  }: any) {
   useEffect(() => {
     if (!loaded) { const t = setTimeout(() => setLoaded(true), 7000); return () => clearTimeout(t) }
   }, [loaded, setLoaded])
