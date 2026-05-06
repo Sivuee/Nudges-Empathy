@@ -750,6 +750,11 @@ function ExperimentPage() {
 
   // Latest manual edit count reported by LesTab
   const [manualEditCount, setManualEditCount] = useState(0)
+  const manualEditCountRef = React.useRef(0)   // always-current mirror for async reads
+  const handleManualEditCount = React.useCallback((count: number) => {
+    manualEditCountRef.current = count
+    setManualEditCount(count)
+  }, [])
 
   useEffect(() => {
     const p   = new URLSearchParams(window.location.search)
@@ -769,32 +774,38 @@ function ExperimentPage() {
   // seen so far per phase, so navigating away (Les → Lesoverzicht → Les)
   // never resets accumulated reading time back to zero.
   const [readingAnalysis, setReadingAnalysis] = useState<ReadingAnalysis | null>(null)
+  const readingAnalysisRef = React.useRef<ReadingAnalysis | null>(null)   // always-current mirror for async reads
   const stableSetAnalysis = useCallback((incoming: ReadingAnalysis) => {
     setReadingAnalysis(prev => {
-      if (!prev) return incoming
+      let result: ReadingAnalysis
+      if (!prev) {
+        result = incoming
+      } else {
+        const mergedSections: SectionReading[] = incoming.sections.map(ns => {
+          const ps = prev.sections.find(s => s.sectionId === ns.sectionId)
+          const readScore = ps ? Math.max(ps.readScore, ns.readScore) : ns.readScore
+          return { ...ns, readScore, readTier: readTierFromScore(readScore) }
+        })
 
-      const mergedSections: SectionReading[] = incoming.sections.map(ns => {
-        const ps = prev.sections.find(s => s.sectionId === ns.sectionId)
-        const readScore = ps ? Math.max(ps.readScore, ns.readScore) : ns.readScore
-        return { ...ns, readScore, readTier: readTierFromScore(readScore) }
-      })
+        const averageReadScore = Math.round(
+          mergedSections.reduce((s, r) => s + r.readScore, 0) / mergedSections.length
+        )
+        const overallReadTier   = readTierFromScore(averageReadScore)
+        const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
+          ? 'Menselijk' : 'AIGegenereerd'
+        const weakestReadLabels = [...mergedSections]
+          .filter(s => s.readTier !== 'Duidelijk')
+          .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
+        const weakestEditLabels = [...mergedSections]
+          .sort((a, b) => {
+            if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
+            return a.readScore - b.readScore
+          }).slice(0, 2).map(s => s.label)
 
-      const averageReadScore = Math.round(
-        mergedSections.reduce((s, r) => s + r.readScore, 0) / mergedSections.length
-      )
-      const overallReadTier   = readTierFromScore(averageReadScore)
-      const overallEditTier: EditTier = mergedSections.every(s => s.editTier === 'Menselijk')
-        ? 'Menselijk' : 'AIGegenereerd'
-      const weakestReadLabels = [...mergedSections]
-        .filter(s => s.readTier !== 'Duidelijk')
-        .sort((a, b) => a.readScore - b.readScore).slice(0, 2).map(s => s.label)
-      const weakestEditLabels = [...mergedSections]
-        .sort((a, b) => {
-          if (a.editTier !== b.editTier) return a.editTier === 'AIGegenereerd' ? -1 : 1
-          return a.readScore - b.readScore
-        }).slice(0, 2).map(s => s.label)
-
-      return { sections: mergedSections, averageReadScore, overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels }
+        result = { sections: mergedSections, averageReadScore, overallReadTier, overallEditTier, weakestReadLabels, weakestEditLabels }
+      }
+      readingAnalysisRef.current = result
+      return result
     })
   }, [])
   // Tracker mounted flag — wait one frame after LesTab mounts so phase cards are in DOM
@@ -821,6 +832,7 @@ function ExperimentPage() {
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
     const additionalMs = lesEditStartRef.current !== null ? Date.now() - lesEditStartRef.current : 0
     const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
+    const ra = readingAnalysisRef.current
     return JSON.stringify({
       participant_id:        participantIdRef.current,
       levenshtein_distance:  lev,
@@ -838,11 +850,14 @@ function ExperimentPage() {
       ai_prompt_count:       aiInteractions.length,
       ai_prompts:            aiInteractions.map(i => (i as AiInteraction).prompt).join(' | '),
       ai_interactions:       JSON.stringify(aiInteractions),
-      manual_edit_count:     manualEditCount,
+      manual_edit_count:     manualEditCountRef.current,
+      simon_read_tier:       ra?.overallReadTier ?? 'geen data',
+      simon_edit_tier:       ra?.overallEditTier ?? 'geen data',
+      simon_read_score:      ra?.averageReadScore ?? 0,
       ...extra,
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesText, onderwerp, lesdoel, lesduur, aiInteractions, manualEditCount])
+  }, [lesText, onderwerp, lesdoel, lesduur, aiInteractions])
 
   const sendSnapshot = React.useCallback((step: string) => {
     return fetch('https://formspree.io/f/xojpoypd', {
@@ -942,9 +957,9 @@ function ExperimentPage() {
           lesdoel_text: lesdoel,
           lesduur_min:  lesduur ?? null,
           les_edit_time_sec:  finalLesEditSec,
-          simon_read_tier: readingAnalysis?.overallReadTier ?? 'geen data',
-          simon_edit_tier: readingAnalysis?.overallEditTier ?? 'geen data',
-          simon_read_score: readingAnalysis?.averageReadScore ?? 0,
+          simon_read_tier: readingAnalysisRef.current?.overallReadTier ?? 'geen data',
+          simon_edit_tier: readingAnalysisRef.current?.overallEditTier ?? 'geen data',
+          simon_read_score: readingAnalysisRef.current?.averageReadScore ?? 0,
           // AI interaction tracking
           ai_prompt_count:    aiInteractions.length,
           ai_prompts:         aiInteractions.map(i => i.prompt).join(' | '),
@@ -955,7 +970,7 @@ function ExperimentPage() {
           edit_ratio_verwerking:  phaseEditRatios['verwerking'],
           edit_ratio_afronding:   phaseEditRatios['afronding'],
           edit_ratio_overall:     overallEditRatio,
-          manual_edit_count:  manualEditCount,
+          manual_edit_count:  manualEditCountRef.current,
         }),
       })
       if (!res.ok) throw new Error('failed')
@@ -1061,7 +1076,7 @@ function ExperimentPage() {
                       loaded={lesLoaded} setLoaded={setLesLoaded}
                       onLesTabEnter={handleLesTabEnter} onLesTabLeave={handleLesTabLeave}
                       onAiInteraction={handleAiInteraction}
-                      onManualEditCount={setManualEditCount}
+                      onManualEditCount={handleManualEditCount}
                       trackerMounted={trackerMounted} setTrackerMounted={setTrackerMounted}
                       readingAnalysis={readingAnalysis} onReadingAnalysis={stableSetAnalysis}
                       manualEditTexts={manualEditTexts} onManualInput={handleManualInput}
