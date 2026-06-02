@@ -1090,7 +1090,7 @@ Lesduur: 30 minuten`
         method: 'POST',
         headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'command-r-08-2024',
+          model: 'command-r7b-12-2024',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
@@ -1235,7 +1235,7 @@ Leertaxonomie: ${taxonomieLine}`
         method: 'POST',
         headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'command-r-08-2024',
+          model: 'command-r7b-12-2024',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
