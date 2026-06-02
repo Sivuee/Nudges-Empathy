@@ -346,6 +346,32 @@ const ORIGINAL_PHASE_TEXT: Record<string, string> = (() => {
   return result
 })()
 
+// Split a markdown lesson into per-phase buckets, keyed by the four
+// structural anchors (## Introductie / Instructie / Verwerking / Afronding).
+// The heading lines themselves are consumed (never shown to the user); only
+// the body that follows each anchor is kept. Works regardless of the language
+// the lesson body is written in, because the anchors stay constant.
+function parsePhaseBlocks(text: string): Record<OutlinePhase, string[]> {
+  const phases: OutlinePhase[] = ['introductie', 'instructie', 'verwerking', 'afronding']
+  const buckets: Record<OutlinePhase, string[]> = { introductie: [], instructie: [], verwerking: [], afronding: [] }
+  let current: OutlinePhase | null = null
+  for (const line of text.split('\n')) {
+    const m = line.match(/^##\s+(.+)$/)
+    if (m) {
+      const key = m[1].trim().toLowerCase()
+      const matched = phases.find(p => p === key)
+      if (matched) { current = matched; continue }
+    }
+    if (current) buckets[current].push(line)
+  }
+  const result: Record<OutlinePhase, string[]> = { introductie: [], instructie: [], verwerking: [], afronding: [] }
+  for (const p of phases) {
+    const content = buckets[p].join('\n').trim()
+    result[p] = content ? [content] : []
+  }
+  return result
+}
+
 function simpleLevenshtein(a: string, b: string): number {
   const m = a.length, n = b.length
   if (m === 0) return n
@@ -683,6 +709,10 @@ function ExperimentPage() {
   // Les
   const [lesText, setLesText]     = useState(EXPERIMENT_TEXT)
   const [lesLoaded, setLesLoaded] = useState(false)
+  // Live lesson generation state
+  const [lesGenerated, setLesGenerated]   = useState(false)
+  const [lesGenerating, setLesGenerating] = useState(false)
+  const lesGeneratingRef = useRef(false)
 
   // phaseBlocks lives in the parent so it survives LesTab unmounting on tab navigation
   const [phaseBlocks, setPhaseBlocks] = useState<Record<OutlinePhase, string[]>>(() => {
@@ -877,8 +907,110 @@ function ExperimentPage() {
   const wordCount      = onderwerp.trim().split(/\s+/).filter(Boolean).length
   const isDetailsValid = !!educatieNiveau && wordCount >= 3 && lesdoel.trim().length > 0
 
+  // ── Live lesson generation ─────────────────────────────────────────────────
+  // Generates the full lesson text via the LLM, taking the target audience
+  // (doelgroep), subject (onderwerp), learning taxonomy and lesdoel into
+  // account. Output keeps the existing 4-phase structure and is written in the
+  // language of the lesson title (onderwerp). The Verwerking phase is always an
+  // essay-writing assignment. Result is parsed into phaseBlocks for the editor.
+  const generateLesson = React.useCallback(async (force = false) => {
+    if (lesGeneratingRef.current) return
+    if (!force && lesGenerated) return
+    lesGeneratingRef.current = true
+    setLesGenerating(true)
+    setLesGenerated(false)
+    setLesLoaded(false)
+    setLesoverzichtLoaded(false)
+
+    const taxonomieLine = (taxonomieEnabled && selectedTaxonomie)
+      ? `${selectedTaxonomie}${selectedTaxNiveau ? ` – beoogd denkniveau: ${selectedTaxNiveau}` : ''}`
+      : 'geen specifieke leertaxonomie opgegeven'
+
+    const systemPrompt = `Je bent Max, een onderwijsassistent die een complete, kant-en-klare lestekst genereert voor een docent.
+
+TAAL — BELANGRIJK:
+Schrijf de VOLLEDIGE les in dezelfde taal als de titel/het onderwerp van de les. Detecteer zelf de taal van het opgegeven onderwerp en schrijf ALLE inhoud (subkoppen, uitleg, opdracht, reflectievragen) in die taal. Is het onderwerp Engels, schrijf dan alles in het Engels; is het Nederlands, dan alles in het Nederlands; enzovoort. Vertaal niets terug naar het Nederlands tenzij het onderwerp Nederlands is.
+
+DUUR & OPBOUW:
+De les duurt in totaal 30 minuten en bestaat uit precies vier fasen. Verdeel de tijd ongeveer zo: Introductie ~5 min, Instructie ~12 min, Verwerking ~10 min, Afronding ~3 min.
+
+STRUCTUUR — STRIKT AANHOUDEN:
+Gebruik exact deze vier sectie-markeringen, in deze volgorde, EXACT zo geschreven (dit zijn interne ankers — VERTAAL of HERNOEM ze NOOIT, ook niet als de les in een andere taal is):
+
+## Introductie
+## Instructie
+## Verwerking
+## Afronding
+
+Onder elke fase:
+- Gebruik ### voor subkoppen (in de taal van de les).
+- Gebruik gewone alinea's, "- " voor opsommingen en **vet** voor nadruk.
+- Stem de inhoud, voorbeelden en taalniveau af op de opgegeven DOELGROEP.
+- Stem de gebruikte werkwoorden/denkactiviteiten af op de opgegeven LEERTAXONOMIE en het denkniveau.
+- Laat de inhoud aansluiten op het opgegeven LESDOEL.
+
+VERWERKINGSFASE — ALTIJD EEN ESSAY:
+De Verwerking is ALTIJD een schrijfopdracht waarin de leerling een essay/werkstuk over het onderwerp schrijft. Geef een heldere opdrachtbeschrijving met: wat de leerling moet schrijven, de gewenste opbouw/onderdelen, een richtlengte, en concrete beoordelingscriteria. Kies GEEN andere werkvorm dan een essay.
+
+UITVOER:
+Geef ALLEEN de lestekst terug in markdown, beginnend bij "## Introductie". Geen inleidende zin, geen afsluitende opmerking, geen codeblokken.`
+
+    const userPrompt = `Onderwerp / titel van de les: ${onderwerp}
+Doelgroep: ${doelgroepStr || 'niet gespecificeerd'}
+Lesdoel: ${lesdoel || LESSON_LESDOEL}
+Leertaxonomie: ${taxonomieLine}
+Lesduur: 30 minuten`
+
+    try {
+      const res = await fetch('https://api.cohere.com/v2/chat', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'command-r-08-2024',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: 3000,
+          temperature: 0.7,
+        }),
+      })
+      if (!res.ok) { const e = await res.text().catch(() => ''); throw new Error(`Cohere ${res.status}: ${e}`) }
+      const data = await res.json()
+      let text: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
+
+      // Strip any stray fences / preamble and start exactly at the first anchor.
+      text = text.replace(/```[a-z]*\n?/gi, '').trim()
+      const idx = text.indexOf('## Introductie')
+      if (idx > 0) text = text.slice(idx)
+      text = text.trim()
+
+      const blocks = parsePhaseBlocks(text)
+      const hasContent = (['introductie', 'instructie', 'verwerking', 'afronding'] as OutlinePhase[])
+        .some(p => blocks[p].length > 0)
+      if (!text || !hasContent) throw new Error('Onvolledige lesinhoud ontvangen')
+
+      setLesText(text)
+      setPhaseBlocks(blocks)
+    } catch {
+      // Safety net: fall back to the static lesson so the flow never stalls.
+      setLesText(EXPERIMENT_TEXT)
+      setPhaseBlocks(parsePhaseBlocks(EXPERIMENT_TEXT))
+    } finally {
+      lesGeneratingRef.current = false
+      setLesGenerating(false)
+      setLesGenerated(true)
+      setLesLoaded(true)
+      setLesoverzichtLoaded(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onderwerp, doelgroepStr, lesdoel, taxonomieEnabled, selectedTaxonomie, selectedTaxNiveau, lesGenerated])
+
   const handleSaveDetails = () => {
     if (!isDetailsValid) return
+    // Kick off live generation as the user enters the authoring environment so
+    // the lesson is ready by the time they reach the "Les" step.
+    generateLesson()
     setTopTab('authoring')
     setAppStep('authoring')
   }
@@ -1059,6 +1191,8 @@ function ExperimentPage() {
                       phaseBlocks={phaseBlocks} setPhaseBlocks={setPhaseBlocks}
                       lessonOutline={lessonOutline} lesdoel={activeLesdoel} condition={condition}
                       loaded={lesLoaded} setLoaded={setLesLoaded}
+                      lesGenerated={lesGenerated} lesGenerating={lesGenerating}
+                      onGenerateLesson={generateLesson}
                       onLesTabEnter={handleLesTabEnter} onLesTabLeave={handleLesTabLeave}
                       onAiInteraction={handleAiInteraction}
                       onManualEditCount={setManualEditCount}
@@ -1904,11 +2038,17 @@ const PhaseCard = React.forwardRef<HTMLDivElement, {
 })
 
 function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutline, lesdoel, condition, onLesTabEnter, onAiInteraction, onLesTabLeave, onManualEditCount,
-  loaded, setLoaded, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
+  loaded, setLoaded, lesGenerated, lesGenerating, onGenerateLesson, trackerMounted, setTrackerMounted, readingAnalysis, onReadingAnalysis,
   manualEditTexts, onManualInput, onPrev, onNext, nextLoading  }: any) {
+  // The MaxLoader is shown until the live lesson generation has completed
+  // (`loaded` is flipped true by the generator). If generation somehow hasn't
+  // started yet by the time this tab is reached, kick it off here so the loader
+  // never hangs indefinitely.
   useEffect(() => {
-    if (!loaded) { const t = setTimeout(() => setLoaded(true), 7000); return () => clearTimeout(t) }
-  }, [loaded, setLoaded])
+    if (!loaded && !lesGenerated && !lesGenerating) {
+      onGenerateLesson?.()
+    }
+  }, [loaded, lesGenerated, lesGenerating, onGenerateLesson])
 
   // Timer: start when this tab mounts, stop when it unmounts
   useEffect(() => {
@@ -2012,7 +2152,7 @@ function LesTab({ lesText, setLesText, phaseBlocks, setPhaseBlocks, lessonOutlin
         <NudgeBox condition={condition} tab="les" />
 
         <div className="space-y-5">
-          {phases.filter(p => lessonOutline[p].active).map(phase => (
+          {loaded && phases.filter(p => lessonOutline[p].active).map(phase => (
             <PhaseCard key={phase} phase={phase}
               ref={editorRefs[phase]}
               blocks={phaseBlocks[phase]}
