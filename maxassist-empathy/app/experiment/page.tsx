@@ -1684,7 +1684,7 @@ function LesDetailsTab({ educatieNiveau, setEducatieNiveau, educatieSpecifiekNiv
             <div className="flex gap-2 items-end">
               <div className="w-7 h-7 rounded-full bg-gradient-to-r from-[#E13AA1] to-[#F63] shrink-0 flex items-center justify-center text-white text-[10px] font-bold">M</div>
               <div className="bg-[#FAFBFD] rounded-xl rounded-bl-none px-4 py-3 text-sm text-gray-700">
-                Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant is om een nieuwe feature te testen. Hierbij is je opdracht: Maak een les van <b>een uur</b> over <b>Formatieve vs Summatieve evaluatie</b> voor <b>MBO niveau 4.</b>
+                Hoi, ik ben Max. Met deze tool kan je een samen met AI een les maken over van allerlei verschillende onderwerpen!
               </div>
             </div>
           </div>
