@@ -1007,10 +1007,19 @@ Je MOET met opzet PRECIES 5 feitelijke onjuistheden ("hallucinaties") in de lest
 REGELS VOOR DE 5 HALLUCINATIES:
 1. Het zijn er EXACT 5. Niet 4, niet 6. Vijf.
 2. Elke hallucinatie is van een ANDER type. Kies 5 verschillende types uit de 6 types hieronder.
-3. Verwerk elke hallucinatie als een normale, vloeiende zin MIDDEN IN de gewone lestekst (in de Introductie, Instructie of Afronding — NIET in de opdrachtcriteria van het werkstuk). Het moet eruitzien als een gewone bewering, niet gemarkeerd.
+3. Verwerk elke hallucinatie als een normale, vloeiende zin MIDDEN IN de gewone lestekst (in de Introductie, Instructie of Afronding — NIET in de opdrachtcriteria van het werkstuk).
 4. De hallucinaties mogen vrij duidelijk/opvallend fout zijn, maar moeten wel over het onderwerp van de les gaan.
 5. Schrijf de zin in dezelfde taal als de rest van de les.
 6. Verzin GEEN extra fouten buiten deze 5. De rest van de les moet feitelijk correct zijn.
+
+ALLERBELANGRIJKSTE REGEL — MARKEER ELKE HALLUCINATIE IN DE TEKST:
+Zet om ELKE van de 5 foutieve zinnen, OP DE PLEK IN DE LES ZELF, een opening- en sluitmarkering met een nummer van 1 t/m 5:
+[[HALLU:1]] ... de foutieve zin ... [[/HALLU:1]]
+[[HALLU:2]] ... de foutieve zin ... [[/HALLU:2]]
+... enzovoort tot en met 5.
+- De foutieve zin staat dus LETTERLIJK tussen de markeringen, midden in de lestekst.
+- Gebruik elk nummer (1 t/m 5) precies één keer.
+- Verzin GEEN foutieve zinnen die je niet ook tussen markeringen in de les zet. Alles wat je later in de JSON noemt, MOET tussen [[HALLU:n]]...[[/HALLU:n]] in de tekst staan.
 
 DE 6 TYPES (kies er 5, elk type maar één keer) — met telkens een voorbeeld:
 - Numeric Nuisance: genereer een getalswaarde over een gebeurtenis uit het verleden, zoals een datum, leeftijd of geldbedrag, die niet klopt met de feiten. Voorbeeld: "Het artikel van Scriven verscheen in 2031." — waarbij het jaartal fout is.
@@ -1021,18 +1030,18 @@ DE 6 TYPES (kies er 5, elk type maar één keer) — met telkens een voorbeeld:
 - Time Wrap: meng gebeurtenissen of personen uit verschillende tijdperken door elkaar. Voorbeeld: "Tijdens de coronapandemie van 2020 riep president Obama op tot afstandsonderwijs." — terwijl Obama toen geen president was.
 
 UITVOER — VOLG DIT FORMAAT EXACT:
-Geef EERST de volledige lestekst in markdown, beginnend bij "## Introductie" (geen inleidende zin, geen codeblokken).
+Geef EERST de volledige lestekst in markdown, beginnend bij "## Introductie" (geen inleidende zin, geen codeblokken), met daarin de 5 zinnen tussen [[HALLU:1]]...[[/HALLU:1]] t/m [[HALLU:5]]...[[/HALLU:5]].
 Schrijf DAARNA op een nieuwe regel exact deze scheidingsregel:
 ===HALLUCINATIES_JSON===
-Schrijf DAARNA een geldige JSON-array met PRECIES 5 objecten, één per hallucinatie die je hebt ingevoegd. Elk object heeft exact deze drie sleutels:
+Schrijf DAARNA een geldige JSON-array met PRECIES 5 objecten, één per hallucinatie. In de JSON zet je NIET de foutieve zin zelf (die staat al tussen de markeringen in de tekst), maar alleen:
+- "id": het nummer van de markering (1 t/m 5) waar deze hallucinatie staat.
 - "type": de naam van het type, EXACT in het Engels zoals hierboven (bijv. "Numeric Nuisance").
-- "ingevoegd": de letterlijke zin zoals die in de lestekst staat (woord voor woord overgeschreven).
 - "correct": wat het juiste feit is.
 Voorbeeld van het JSON-deel:
 ===HALLUCINATIES_JSON===
 [
-  {"type":"Numeric Nuisance","ingevoegd":"Het artikel van Scriven verscheen in 2031.","correct":"Het artikel verscheen in 1967."},
-  {"type":"Acronym Ambiguity","ingevoegd":"RLHF staat voor Reward-free Learning from Human Feedback.","correct":"RLHF staat voor Reinforcement Learning from Human Feedback."}
+  {"id":1,"type":"Numeric Nuisance","correct":"Het artikel verscheen in 1967."},
+  {"id":2,"type":"Acronym Ambiguity","correct":"RLHF staat voor Reinforcement Learning from Human Feedback."}
 ]
 Geef na de JSON-array niets meer.`
 
@@ -1060,35 +1069,74 @@ Lesduur: 30 minuten`
       const data = await res.json()
       let raw: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
 
-      // Split the lesson text from the machine-readable hallucination report.
-      let hallucinations: { type: string; ingevoegd: string; correct: string }[] = []
+      // ── 1. Separate the lesson text from the machine-readable report ────────
       let text = raw
-      const markerIdx = raw.search(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i)
-      if (markerIdx !== -1) {
-        text = raw.slice(0, markerIdx)
-        const jsonPart = raw.slice(markerIdx).replace(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i, '')
+      const jsonById: Record<string, { type?: string; correct?: string; ingevoegd?: string }> = {}
+      let jsonArr: any[] = []
+      const jsonMarkerIdx = raw.search(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i)
+      if (jsonMarkerIdx !== -1) {
+        text = raw.slice(0, jsonMarkerIdx)
+        const jsonPart = raw.slice(jsonMarkerIdx).replace(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i, '')
         const arrMatch = jsonPart.match(/\[[\s\S]*\]/)
         if (arrMatch) {
           try {
             const parsed = JSON.parse(arrMatch[0])
             if (Array.isArray(parsed)) {
-              hallucinations = parsed
-                .filter(h => h && typeof h === 'object')
-                .map(h => ({
-                  type: String(h.type ?? '').trim(),
-                  ingevoegd: String(h.ingevoegd ?? '').trim(),
-                  correct: String(h.correct ?? '').trim(),
-                }))
+              jsonArr = parsed
+              for (const h of parsed) {
+                if (h && typeof h === 'object' && h.id != null) jsonById[String(h.id)] = h
+              }
             }
-          } catch { /* leave hallucinations empty if JSON is malformed */ }
+          } catch { /* malformed JSON → rely on inline markers / fallback */ }
         }
       }
+
+      // ── 2. Pull each hallucination's sentence directly OUT OF the lesson ────
+      // The sentence is taken from the text itself (between [[HALLU:n]] markers),
+      // so what we report is guaranteed to be present in the lesson — we never
+      // trust the model to re-type it. The JSON only supplies type + correct.
+      const found: { id: string; ingevoegd: string }[] = []
+      const markerRe = /\[\[HALLU:(\d+)\]\]([\s\S]*?)\[\[\/HALLU:\1\]\]/g
+      let mm: RegExpExecArray | null
+      while ((mm = markerRe.exec(text)) !== null) {
+        const inner = mm[2].replace(/\s+/g, ' ').trim()
+        if (inner) found.push({ id: mm[1], ingevoegd: inner })
+      }
+
+      // ── 3. Remove the markers so the lesson reads cleanly (sentence stays) ──
+      text = text
+        .replace(/\[\[\/?HALLU:\d+\]\]/g, '')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/[ \t]+([.,!?;:])/g, '$1')
 
       // Strip any stray fences / preamble and start exactly at the first anchor.
       text = text.replace(/```[a-z]*\n?/gi, '').trim()
       const idx = text.indexOf('## Introductie')
       if (idx > 0) text = text.slice(idx)
       text = text.trim()
+
+      // ── 4. Build the hallucination list ─────────────────────────────────────
+      let hallucinations: { type: string; ingevoegd: string; correct: string }[] = found.map(f => ({
+        type: String(jsonById[f.id]?.type ?? '').trim(),
+        ingevoegd: f.ingevoegd,
+        correct: String(jsonById[f.id]?.correct ?? '').trim(),
+      }))
+      // Fallback: if the model forgot the markers but still listed sentences in
+      // the JSON, keep only those that actually appear in the lesson text.
+      if (hallucinations.length === 0 && jsonArr.length > 0) {
+        hallucinations = jsonArr
+          .filter(h => h && typeof h === 'object' && h.ingevoegd)
+          .map(h => ({
+            type: String(h.type ?? '').trim(),
+            ingevoegd: String(h.ingevoegd).trim(),
+            correct: String(h.correct ?? '').trim(),
+          }))
+      }
+
+      // ── 5. Final guarantee: drop anything not literally in the lesson ───────
+      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+      const haystack = norm(text)
+      hallucinations = hallucinations.filter(h => h.ingevoegd && haystack.includes(norm(h.ingevoegd)))
 
       const blocks = parsePhaseBlocks(text)
       const hasContent = (['introductie', 'instructie', 'verwerking', 'afronding'] as OutlinePhase[])
