@@ -372,6 +372,33 @@ function parsePhaseBlocks(text: string): Record<OutlinePhase, string[]> {
   return result
 }
 
+// ─── Dynamic baseline for edit-tier comparison ──────────────────────────────
+// The "AIGegenereerd vs Menselijk" tier is decided by how much the current
+// text differs from the ORIGINAL AI output. Because the lesson is now generated
+// live, the baseline must be that generated text — not the old static preset.
+// These mutable holders are set once when the lesson is generated; until then
+// they fall back to the static preset so nothing breaks.
+let GENERATED_BASELINE_FULL: string | null = null
+let GENERATED_BASELINE_PHASE_TEXT: Record<string, string> | null = null
+
+function setGeneratedBaseline(fullLessonText: string) {
+  GENERATED_BASELINE_FULL = fullLessonText
+  const blocks = parsePhaseBlocks(fullLessonText)
+  const perPhase: Record<string, string> = {}
+  for (const p of ['introductie', 'instructie', 'verwerking', 'afronding'] as OutlinePhase[]) {
+    perPhase[p] = (blocks[p] ?? []).join('\n\n').trim()
+  }
+  GENERATED_BASELINE_PHASE_TEXT = perPhase
+}
+
+function baselinePhaseText(outlineKey: string): string {
+  return (GENERATED_BASELINE_PHASE_TEXT ?? ORIGINAL_PHASE_TEXT)[outlineKey] ?? ''
+}
+
+function baselineFullText(): string {
+  return GENERATED_BASELINE_FULL ?? EXPERIMENT_TEXT
+}
+
 function simpleLevenshtein(a: string, b: string): number {
   const m = a.length, n = b.length
   if (m === 0) return n
@@ -391,7 +418,7 @@ function simpleLevenshtein(a: string, b: string): number {
 }
 
 function editTierForPhase(currentPhaseText: string, phaseKey: string): EditTier {
-  const original = ORIGINAL_PHASE_TEXT[PHASE_ID_TO_OUTLINE[phaseKey] ?? ''] ?? ''
+  const original = baselinePhaseText(PHASE_ID_TO_OUTLINE[phaseKey] ?? '')
   if (!original) return 'AIGegenereerd'
   const dist  = simpleLevenshtein(
     currentPhaseText.replace(/\s+/g, ' ').trim(),
@@ -713,6 +740,11 @@ function ExperimentPage() {
   const [lesGenerated, setLesGenerated]   = useState(false)
   const [lesGenerating, setLesGenerating] = useState(false)
   const lesGeneratingRef = useRef(false)
+  // Hallucinations the generator deliberately injected into the lesson, kept so
+  // they can be reported to the researcher via the Formspree submission.
+  const [injectedHallucinations, setInjectedHallucinations] = useState<{ type: string; ingevoegd: string; correct: string }[]>([])
+  const injectedHallucinationsRef = useRef<{ type: string; ingevoegd: string; correct: string }[]>([])
+  useEffect(() => { injectedHallucinationsRef.current = injectedHallucinations }, [injectedHallucinations])
 
   // phaseBlocks lives in the parent so it survives LesTab unmounting on tab navigation
   const [phaseBlocks, setPhaseBlocks] = useState<Record<OutlinePhase, string[]>>(() => {
@@ -847,7 +879,7 @@ function ExperimentPage() {
 
   const buildPayload = React.useCallback((extra: {[k: string]: unknown} = {}) => {
     const plainText = stripHtml(lesText)
-    const lev = levenshtein(plainText, EXPERIMENT_TEXT)
+    const lev = levenshtein(plainText, stripHtml(baselineFullText()))
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
     const additionalMs = lesEditStartRef.current !== null ? Date.now() - lesEditStartRef.current : 0
     const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
@@ -869,6 +901,9 @@ function ExperimentPage() {
       ai_prompts:            aiInteractions.map(i => (i as AiInteraction).prompt).join(' | '),
       ai_interactions:       JSON.stringify(aiInteractions),
       manual_edit_count:     manualEditCount,
+      hallucination_count:   injectedHallucinationsRef.current.length,
+      hallucinations_injected: JSON.stringify(injectedHallucinationsRef.current),
+      generated_lesson_original: baselineFullText(),
       ...extra,
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -964,8 +999,42 @@ VOORBEELD VAN DE VEREISTE OPMAAK (inhoud is illustratief, niet overnemen):
 VERWERKINGSFASE — ALTIJD EEN SCHRIJFOPDRACHT:
 De Verwerking is ALTIJD een schrijfopdracht waarin de leerling een langere tekst over het onderwerp schrijft. Noem deze opdracht met het gangbare woord in de taal van de les: in het Nederlands een "werkstuk" (gebruik NIET het woord "essay"), in het Engels een "essay", enzovoort. Geef een heldere opdrachtbeschrijving met: wat de leerling moet schrijven, de gewenste opbouw/onderdelen, een richtlengte, en concrete beoordelingscriteria. Kies GEEN andere werkvorm dan deze schrijfopdracht.
 
-UITVOER:
-Geef ALLEEN de lestekst terug in markdown, beginnend bij "## Introductie". Geen inleidende zin, geen afsluitende opmerking, geen codeblokken.`
+========================================================================
+HALLUCINATIES — ZEER BELANGRIJK, LEES DIT LANGZAAM EN VOLG HET EXACT:
+========================================================================
+Je MOET met opzet PRECIES 5 feitelijke onjuistheden ("hallucinaties") in de lestekst verwerken. Dit hoort bij een wetenschappelijk experiment; de fouten zijn dus de bedoeling.
+
+REGELS VOOR DE 5 HALLUCINATIES:
+1. Het zijn er EXACT 5. Niet 4, niet 6. Vijf.
+2. Elke hallucinatie is van een ANDER type. Kies 5 verschillende types uit de 6 types hieronder.
+3. Verwerk elke hallucinatie als een normale, vloeiende zin MIDDEN IN de gewone lestekst (in de Introductie, Instructie of Afronding — NIET in de opdrachtcriteria van het werkstuk). Het moet eruitzien als een gewone bewering, niet gemarkeerd.
+4. De hallucinaties mogen vrij duidelijk/opvallend fout zijn, maar moeten wel over het onderwerp van de les gaan.
+5. Schrijf de zin in dezelfde taal als de rest van de les.
+6. Verzin GEEN extra fouten buiten deze 5. De rest van de les moet feitelijk correct zijn.
+
+DE 6 TYPES (kies er 5, elk type maar één keer) — met telkens een voorbeeld:
+- Numeric Nuisance: genereer een getalswaarde over een gebeurtenis uit het verleden, zoals een datum, leeftijd of geldbedrag, die niet klopt met de feiten. Voorbeeld: "Het artikel van Scriven verscheen in 2031." — waarbij het jaartal fout is.
+- Acronym Ambiguity: geef een verkeerde of onjuiste uitleg/voluit-schrijving van een afkorting. Voorbeeld: "RLHF staat voor Reward-free Learning from Human Feedback." — terwijl het in werkelijkheid "Reinforcement Learning from Human Feedback" is.
+- Generated Golem: verzin een niet-bestaande persoon die je koppelt aan een gebeurtenis of vakgebied, zonder bewijs dat die persoon bestaat. Voorbeeld: "Volgens onderzoeker Hasan Cetin is dit principe voor het eerst beschreven." — waarbij die persoon niet bestaat.
+- Virtual Voice: schrijf een citaat toe aan een (echte of verzonnen) persoon terwijl die dat nooit gezegd heeft. Voorbeeld: "Einstein zei ooit: 'Toetsen meten alleen wat je vergeten bent.'" — een citaat dat hij nooit heeft uitgesproken.
+- Geographic Erratum: koppel een verkeerde locatie aan iets of iemand. Voorbeeld: "De Universiteit van Bologna, gelegen in Spanje, ..." — terwijl Bologna in Italië ligt.
+- Time Wrap: meng gebeurtenissen of personen uit verschillende tijdperken door elkaar. Voorbeeld: "Tijdens de coronapandemie van 2020 riep president Obama op tot afstandsonderwijs." — terwijl Obama toen geen president was.
+
+UITVOER — VOLG DIT FORMAAT EXACT:
+Geef EERST de volledige lestekst in markdown, beginnend bij "## Introductie" (geen inleidende zin, geen codeblokken).
+Schrijf DAARNA op een nieuwe regel exact deze scheidingsregel:
+===HALLUCINATIES_JSON===
+Schrijf DAARNA een geldige JSON-array met PRECIES 5 objecten, één per hallucinatie die je hebt ingevoegd. Elk object heeft exact deze drie sleutels:
+- "type": de naam van het type, EXACT in het Engels zoals hierboven (bijv. "Numeric Nuisance").
+- "ingevoegd": de letterlijke zin zoals die in de lestekst staat (woord voor woord overgeschreven).
+- "correct": wat het juiste feit is.
+Voorbeeld van het JSON-deel:
+===HALLUCINATIES_JSON===
+[
+  {"type":"Numeric Nuisance","ingevoegd":"Het artikel van Scriven verscheen in 2031.","correct":"Het artikel verscheen in 1967."},
+  {"type":"Acronym Ambiguity","ingevoegd":"RLHF staat voor Reward-free Learning from Human Feedback.","correct":"RLHF staat voor Reinforcement Learning from Human Feedback."}
+]
+Geef na de JSON-array niets meer.`
 
     const userPrompt = `Onderwerp / titel van de les: ${onderwerp}
 Doelgroep: ${doelgroepStr || 'niet gespecificeerd'}
@@ -989,7 +1058,31 @@ Lesduur: 30 minuten`
       })
       if (!res.ok) { const e = await res.text().catch(() => ''); throw new Error(`Cohere ${res.status}: ${e}`) }
       const data = await res.json()
-      let text: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
+      let raw: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
+
+      // Split the lesson text from the machine-readable hallucination report.
+      let hallucinations: { type: string; ingevoegd: string; correct: string }[] = []
+      let text = raw
+      const markerIdx = raw.search(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i)
+      if (markerIdx !== -1) {
+        text = raw.slice(0, markerIdx)
+        const jsonPart = raw.slice(markerIdx).replace(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i, '')
+        const arrMatch = jsonPart.match(/\[[\s\S]*\]/)
+        if (arrMatch) {
+          try {
+            const parsed = JSON.parse(arrMatch[0])
+            if (Array.isArray(parsed)) {
+              hallucinations = parsed
+                .filter(h => h && typeof h === 'object')
+                .map(h => ({
+                  type: String(h.type ?? '').trim(),
+                  ingevoegd: String(h.ingevoegd ?? '').trim(),
+                  correct: String(h.correct ?? '').trim(),
+                }))
+            }
+          } catch { /* leave hallucinations empty if JSON is malformed */ }
+        }
+      }
 
       // Strip any stray fences / preamble and start exactly at the first anchor.
       text = text.replace(/```[a-z]*\n?/gi, '').trim()
@@ -1004,10 +1097,15 @@ Lesduur: 30 minuten`
 
       setLesText(text)
       setPhaseBlocks(blocks)
+      setInjectedHallucinations(hallucinations)
+      // Baseline for the edit-tier comparison = the lesson exactly as generated.
+      setGeneratedBaseline(text)
     } catch {
       // Safety net: fall back to the static lesson so the flow never stalls.
       setLesText(EXPERIMENT_TEXT)
       setPhaseBlocks(parsePhaseBlocks(EXPERIMENT_TEXT))
+      setInjectedHallucinations([])
+      setGeneratedBaseline(EXPERIMENT_TEXT)
     } finally {
       lesGeneratingRef.current = false
       setLesGenerating(false)
@@ -1088,14 +1186,14 @@ Leertaxonomie: ${taxonomieLine}`
     lesEditStartRef.current = null
     const finalLesEditSec = Math.round((lesEditMsRef.current + additionalMs) / 1000)
     const plainText = stripHtml(lesText)
-    const lev = levenshtein(plainText, EXPERIMENT_TEXT)
+    const lev = levenshtein(plainText, stripHtml(baselineFullText()))
     const { corrected, uncorrected, undetectable, rate } = countCorrectedErrors(plainText)
 
     // Compute per-phase edit ratios using the same logic as editTierForPhase
     const phaseEditRatios: Record<string, number> = {}
     const phases: OutlinePhase[] = ['introductie', 'instructie', 'verwerking', 'afronding']
     for (const phase of phases) {
-      const original = ORIGINAL_PHASE_TEXT[phase] ?? ''
+      const original = baselinePhaseText(phase)
       const outlineKey = phase
       const currentText = manualEditTexts[outlineKey] !== null && manualEditTexts[outlineKey] !== undefined
         ? stripHtmlForEdit(manualEditTexts[outlineKey] as string)
