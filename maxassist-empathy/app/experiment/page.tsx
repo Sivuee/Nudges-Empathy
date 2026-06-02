@@ -1128,6 +1128,7 @@ WANNEER IS EEN FOUT GOED (hier ging het eerder mis — lees goed):
 - GEEN meningen, GEEN vage toevoegingen, GEEN extra woorden zonder echte onwaarheid. Als "vervang" alleen wat woorden toevoegt zonder een duidelijk verkeerd feit, is het FOUT.
 - Gebruik bekende feiten (hoofdsteden, inwonertallen, bekende jaartallen/personen/afkortingen). Geen obscure kennis.
 - Schrijf "zoek", "vervang" en "correct" in dezelfde taal als de lestekst.
+- Zorg ervoor dat als je een fout toevoegt dat deze daadwerkelijk fout is. Voorbeeld: Europese Unie (EU) dit kan een acronym ambiguity zijn maar deze acronym is correct. Een correcte fout is Europese Uniekheid (EU)
 
 VERPLICHT KENMERK PER TYPE — dit MOET letterlijk in "vervang" staan:
 - Numeric Nuisance → een concreet GETAL in cijfers dat overduidelijk verkeerd is (bv. "ongeveer 2 miljoen inwoners" terwijl het er 56 miljoen zijn).
