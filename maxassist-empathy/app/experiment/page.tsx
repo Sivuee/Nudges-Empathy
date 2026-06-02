@@ -1722,7 +1722,7 @@ function LesplanTab({ lesduur, setLesduur, verwerkingOpdracht, lesdoel, onNext }
           <Btn variant="default" onClick={onNext} disabled={!canNext}>Volgende <ChevRight /></Btn>
         </div>
       </div>
-      <ChatPanel lesdoel={lesdoel} message="Hoi, ik ben Max. Ik heb instructies doorgekregen van de onderzoeker waar dit experiment over gaat. Hij vertelde mij dat dit een MaxAssist-variant is om een nieuwe feature te testen. Hierbij is je opdracht: Maak een les van een uur over Formatieve vs Summatieve evaluatie voor MBO niveau 4." />
+      <ChatPanel lesdoel={lesdoel} message="Hoi, ik ben Max. Met deze tool kan je een samen met AI een les maken over van allerlei verschillende onderwerpen!" />
     </div>
   )
 }
