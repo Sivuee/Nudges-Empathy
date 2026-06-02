@@ -931,6 +931,10 @@ function ExperimentPage() {
 TAAL — BELANGRIJK:
 Schrijf de VOLLEDIGE les in dezelfde taal als de titel/het onderwerp van de les. Detecteer zelf de taal van het opgegeven onderwerp en schrijf ALLE inhoud (subkoppen, uitleg, opdracht, reflectievragen) in die taal. Is het onderwerp Engels, schrijf dan alles in het Engels; is het Nederlands, dan alles in het Nederlands; enzovoort. Vertaal niets terug naar het Nederlands tenzij het onderwerp Nederlands is.
 
+TAALGEBRUIK & REGISTER:
+- Stem het taalgebruik, de zinslengte en de woordkeuze af op het NIVEAU van de doelgroep (een les voor het basisonderwijs is eenvoudiger geformuleerd dan een les voor het hbo/wo).
+- Vermijd onnodige verengelsing in Nederlandse tekst: gebruik Nederlandse woorden waar die bestaan (bijv. "werkstuk" in plaats van "essay", "opdracht" in plaats van "assignment", "terugkoppeling" in plaats van "feedback" waar dat natuurlijk past). Gebruik alleen leenwoorden als er geen gangbaar Nederlands alternatief is.
+
 DUUR & OPBOUW:
 De les duurt in totaal 30 minuten en bestaat uit precies vier fasen. Verdeel de tijd ongeveer zo: Introductie ~5 min, Instructie ~12 min, Verwerking ~10 min, Afronding ~3 min.
 
@@ -942,15 +946,23 @@ Gebruik exact deze vier sectie-markeringen, in deze volgorde, EXACT zo geschreve
 ## Verwerking
 ## Afronding
 
-Onder elke fase:
-- Gebruik ### voor subkoppen (in de taal van de les).
-- Gebruik gewone alinea's, "- " voor opsommingen en **vet** voor nadruk.
-- Stem de inhoud, voorbeelden en taalniveau af op de opgegeven DOELGROEP.
+VERPLICHTE OPMAAK BINNEN ELKE FASE:
+- Elke fase MOET beginnen met minimaal één subkop op niveau 3 (een regel die start met "### "). Gebruik waar logisch meerdere subkoppen om de inhoud op te delen.
+- Schrijf onder de subkoppen volledige, uitgewerkte alinea's (geen telegramstijl). De les mag uitgebreid zijn: schrijf per fase meerdere alinea's met genoeg inhoudelijke diepgang voor de docent om direct te gebruiken.
+- Gebruik "- " voor opsommingen en **vet** voor nadruk op kernbegrippen.
+- Stem de inhoud, voorbeelden en het taalniveau af op de opgegeven DOELGROEP.
 - Stem de gebruikte werkwoorden/denkactiviteiten af op de opgegeven LEERTAXONOMIE en het denkniveau.
 - Laat de inhoud aansluiten op het opgegeven LESDOEL.
 
-VERWERKINGSFASE — ALTIJD EEN ESSAY:
-De Verwerking is ALTIJD een schrijfopdracht waarin de leerling een essay/werkstuk over het onderwerp schrijft. Geef een heldere opdrachtbeschrijving met: wat de leerling moet schrijven, de gewenste opbouw/onderdelen, een richtlengte, en concrete beoordelingscriteria. Kies GEEN andere werkvorm dan een essay.
+VOORBEELD VAN DE VEREISTE OPMAAK (inhoud is illustratief, niet overnemen):
+## Introductie
+### Aansluiten bij voorkennis
+<uitgewerkte alinea(s)...>
+### Lesdoel introduceren
+<uitgewerkte alinea(s)...>
+
+VERWERKINGSFASE — ALTIJD EEN SCHRIJFOPDRACHT:
+De Verwerking is ALTIJD een schrijfopdracht waarin de leerling een langere tekst over het onderwerp schrijft. Noem deze opdracht met het gangbare woord in de taal van de les: in het Nederlands een "werkstuk" (gebruik NIET het woord "essay"), in het Engels een "essay", enzovoort. Geef een heldere opdrachtbeschrijving met: wat de leerling moet schrijven, de gewenste opbouw/onderdelen, een richtlengte, en concrete beoordelingscriteria. Kies GEEN andere werkvorm dan deze schrijfopdracht.
 
 UITVOER:
 Geef ALLEEN de lestekst terug in markdown, beginnend bij "## Introductie". Geen inleidende zin, geen afsluitende opmerking, geen codeblokken.`
@@ -971,7 +983,7 @@ Lesduur: 30 minuten`
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
-          max_tokens: 3000,
+          max_tokens: 4000,
           temperature: 0.7,
         }),
       })
@@ -1015,17 +1027,58 @@ Lesduur: 30 minuten`
     setAppStep('authoring')
   }
 
-  // Lesdoel: 2s fake thinking time
-  const handleGenerateLesdoel = () => {
-    if (wordCount < 3) return
+  // Lesdoel: generated live by the LLM based on the topic (onderwerp),
+  // target audience and learning taxonomy. Falls back to the static lesdoel
+  // if the call fails.
+  const handleGenerateLesdoel = async () => {
+    if (wordCount < 3 || lesdoelLoading) return
     setLesdoelLoading(true)
     setLesdoel('')
     setShowLesdoelInput(false)
-    setTimeout(() => {
+
+    const taxonomieLine = (taxonomieEnabled && selectedTaxonomie)
+      ? `${selectedTaxonomie}${selectedTaxNiveau ? ` – beoogd denkniveau: ${selectedTaxNiveau}` : ''}`
+      : 'geen specifieke leertaxonomie opgegeven'
+
+    const systemPrompt = `Je bent Max, een onderwijsassistent. Je formuleert één helder, meetbaar lesdoel op basis van het opgegeven onderwerp, de doelgroep en (indien opgegeven) de leertaxonomie.
+
+REGELS:
+- Schrijf het lesdoel in dezelfde taal als het onderwerp van de les.
+- Formuleer vanuit het perspectief van de leerling ("De leerling kan ...") en maak het concreet en meetbaar.
+- Stem het werkwoord/denkniveau af op de opgegeven leertaxonomie.
+- Stem het taalgebruik en de woordkeuze af op het niveau van de doelgroep.
+- Vermijd onnodige verengelsing in Nederlandse tekst: gebruik Nederlandse woorden waar die bestaan (bijv. "werkstuk" in plaats van "essay", "opdracht" in plaats van "assignment"). Gebruik alleen leenwoorden als er geen gangbaar Nederlands alternatief is.
+- Geef ALLEEN de zin van het lesdoel terug. Geen aanhalingstekens, geen toelichting, geen opsomming.`
+
+    const userPrompt = `Onderwerp: ${onderwerp}
+Doelgroep: ${doelgroepStr || 'niet gespecificeerd'}
+Leertaxonomie: ${taxonomieLine}`
+
+    try {
+      const res = await fetch('https://api.cohere.com/v2/chat', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'command-r-08-2024',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: 200,
+          temperature: 0.5,
+        }),
+      })
+      if (!res.ok) throw new Error(`Cohere ${res.status}`)
+      const data = await res.json()
+      let text: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
+      text = text.replace(/```[a-z]*\n?/gi, '').replace(/^["'\s]+|["'\s]+$/g, '').trim()
+      setLesdoel(text || LESSON_LESDOEL)
+    } catch {
       setLesdoel(LESSON_LESDOEL)
+    } finally {
       setShowLesdoelInput(true)
       setLesdoelLoading(false)
-    }, 2000)
+    }
   }
 
   const handleDeelMetCollega = async () => {
