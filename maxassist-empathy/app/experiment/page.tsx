@@ -399,6 +399,77 @@ function baselineFullText(): string {
   return GENERATED_BASELINE_FULL ?? EXPERIMENT_TEXT
 }
 
+// ─── Deterministic hallucination injection ──────────────────────────────────
+// A weak model can't reliably write a clean lesson AND inject well-typed errors
+// in one pass, so we do it in two steps: (1) generate a clean lesson, (2) ask
+// only for find-and-replace edits, then apply them HERE with validation. This
+// guarantees each reported hallucination is literally in the text, actually
+// changes a real sentence, and matches its declared type.
+const HALLU_TYPES = ['Numeric Nuisance', 'Acronym Ambiguity', 'Generated Golem', 'Virtual Voice', 'Geographic Erratum', 'Time Wrap']
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Locate `needle` in `haystack`, tolerant of whitespace differences. Returns
+// the [start, end) span of the actual matched text, or null if not found.
+function findFlexible(haystack: string, needle: string): [number, number] | null {
+  const trimmed = needle.trim()
+  if (!trimmed) return null
+  const exact = haystack.indexOf(trimmed)
+  if (exact !== -1) return [exact, exact + trimmed.length]
+  try {
+    const pattern = escapeRegExp(trimmed).replace(/\s+/g, '\\s+')
+    const m = new RegExp(pattern).exec(haystack)
+    if (m) return [m.index, m.index + m[0].length]
+  } catch { /* ignore bad regex */ }
+  return null
+}
+
+// The false text must carry the structural signature of its type, otherwise the
+// label is meaningless. Only the reliably-checkable types are enforced.
+function hallucinationSignatureOk(type: string, vervang: string): boolean {
+  switch (type) {
+    case 'Numeric Nuisance': return /\d/.test(vervang)
+    case 'Time Wrap':        return /\d/.test(vervang)
+    case 'Acronym Ambiguity':return /\b[A-Z]{2,}\b/.test(vervang)
+    case 'Virtual Voice':    return /["'“”‘’«»„]/.test(vervang)
+    default:                 return true // Geographic Erratum / Generated Golem: no reliable text signature
+  }
+}
+
+// Apply the model's edit list to the clean lesson. Each edit replaces an exact
+// existing sentence (`zoek`) with a false version (`vervang`). An edit is kept
+// only if: the type is valid and not yet used, the sentence exists in the
+// lesson, the replacement actually differs, and the type signature is present.
+function applyHallucinationEdits(
+  lesson: string,
+  edits: { type?: string; zoek?: string; vervang?: string; correct?: string }[],
+): { text: string; hallucinations: { type: string; ingevoegd: string; correct: string }[] } {
+  let text = lesson
+  const out: { type: string; ingevoegd: string; correct: string }[] = []
+  const usedTypes = new Set<string>()
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+  for (const e of Array.isArray(edits) ? edits : []) {
+    if (out.length >= 5) break
+    if (!e || typeof e !== 'object') continue
+    const type    = String(e.type ?? '').trim()
+    const zoek    = String(e.zoek ?? '').trim()
+    const vervang = String(e.vervang ?? '').trim()
+    const correct = String(e.correct ?? '').trim()
+    if (!HALLU_TYPES.includes(type) || usedTypes.has(type)) continue
+    if (!zoek || !vervang) continue
+    if (norm(zoek) === norm(vervang)) continue            // must actually change something
+    if (!hallucinationSignatureOk(type, vervang)) continue // type must match the content
+    const span = findFlexible(text, zoek)
+    if (!span) continue                                    // target sentence must exist
+    text = text.slice(0, span[0]) + vervang + text.slice(span[1])
+    out.push({ type, ingevoegd: vervang, correct })
+    usedTypes.add(type)
+  }
+  return { text, hallucinations: out }
+}
+
 function simpleLevenshtein(a: string, b: string): number {
   const m = a.length, n = b.length
   if (m === 0) return n
@@ -1002,61 +1073,10 @@ De Verwerking is ALTIJD een schrijfopdracht waarin de leerling een langere tekst
 ========================================================================
 HALLUCINATIES — ZEER BELANGRIJK, LEES DIT LANGZAAM EN VOLG HET EXACT:
 ========================================================================
-Je MOET met opzet PRECIES 5 feitelijke onjuistheden ("hallucinaties") in de lestekst verwerken. Dit hoort bij een wetenschappelijk experiment; de fouten zijn dus de bedoeling.
+GENEREER IN DEZE STAP GEEN FOUTEN. Schrijf een volledig CORRECTE, feitelijk kloppende les. De foutinjectie gebeurt in een aparte stap; jij levert hier alleen de schone les.
 
-WAT IS EEN GOEDE HALLUCINATIE (lees dit goed, dit is waar het vorige antwoord fout ging):
-1. Het is een OBJECTIEVE, CONTROLEERBARE bewering — een hard feit dat waar of onwaar kan zijn (een getal, een plaats, een naam, een citaat, een afkorting, een jaartal). GEEN mening en GEEN vage zin. FOUT voorbeeld (verboden): "Verhuizen kan een uitdagende ervaring zijn." (dit is een mening, geen feit). FOUT voorbeeld (verboden): "Een verhuisvergunning is niet nodig." als de correcte versie hetzelfde zegt — dan is er geen fout.
-2. De bewering is OVERDUIDELIJK ONWAAR volgens ALGEMEEN BEKENDE kennis, zodat een gemiddelde lezer de fout meteen herkent. Gebruik bekende feiten (hoofdsteden, inwonertallen, bekende jaartallen, bekende personen, bekende afkortingen). GEEN obscure of moeilijk te controleren kennis.
-3. De "correct"-waarde geeft het ECHTE feit en MOET duidelijk verschillen van de foutieve zin. Als foutief en correct ongeveer hetzelfde zeggen, is het GEEN hallucinatie en dus verboden.
-4. De zin gaat over het onderwerp van de les of de context ervan.
-
-REGELS:
-1. Het zijn er EXACT 5. Elke hallucinatie is van een ANDER type (kies 5 van de 6 types hieronder, elk type één keer).
-2. Verwerk elke foutieve zin als een vloeiende zin MIDDEN IN de gewone lestekst (Introductie, Instructie of Afronding — NIET in de opdrachtcriteria van het werkstuk).
-3. Schrijf de zin in dezelfde taal als de rest van de les.
-4. Verzin GEEN extra fouten buiten deze 5. De rest van de les is feitelijk correct.
-
-ELK TYPE HEEFT EEN VERPLICHT KENMERK — de zin is alleen geldig als dat kenmerk er letterlijk in staat:
-- Numeric Nuisance → de zin MOET een concreet GETAL bevatten (jaartal, bedrag, percentage, aantal, leeftijd, afstand) dat overduidelijk verkeerd is.
-  Voorbeeld: "Engeland heeft ongeveer 2 miljoen inwoners." (fout: het zijn er circa 56 miljoen). Voorbeeld: "Het Verenigd Koninkrijk verliet de EU in 1995." (fout: dat was in 2020).
-- Geographic Erratum → de zin MOET een PLAATSNAAM (stad, land, gebouw) bevatten die op de verkeerde plek wordt gezet.
-  Voorbeeld: "De hoofdstad van Engeland is Manchester." (fout: dat is Londen). Voorbeeld: "Londen ligt in het noorden van Schotland." (fout: Londen ligt in Engeland).
-- Generated Golem → de zin MOET een PERSOONSNAAM noemen die als bron/autoriteit wordt opgevoerd maar die niet bestaat / niet te verifiëren is.
-  Voorbeeld: "Volgens migratie-expert dr. Pieter van Dalen duurt elke verhuizing precies zes weken."
-- Virtual Voice → de zin MOET een CITAAT tussen aanhalingstekens bevatten, toegeschreven aan een bekende persoon die dat nooit gezegd heeft.
-  Voorbeeld: "Winston Churchill zei ooit: 'Verhuizen naar het buitenland is de beste investering die je kunt doen.'" (dit citaat bestaat niet).
-- Acronym Ambiguity → de zin MOET een AFKORTING bevatten met een verkeerde voluit-schrijving (zet de foute uitleg tussen haakjes).
-  Voorbeeld: "Je hebt een BSN (Brits Sociaal Nummer) nodig." (fout: BSN staat voor Burgerservicenummer en is Nederlands).
-- Time Wrap → de zin MOET een gebeurtenis in het VERKEERDE JAAR/TIJDPERK plaatsen of aan de verkeerde tijd/persoon koppelen.
-  Voorbeeld: "Sinds de Brexit in 1980 heb je een visum nodig." (fout: de Brexit speelde in 2016–2020).
-
-ALLERBELANGRIJKSTE REGEL — MARKEER ELKE HALLUCINATIE IN DE TEKST:
-Zet om ELKE van de 5 foutieve zinnen, OP DE PLEK IN DE LES ZELF, een opening- en sluitmarkering met een nummer van 1 t/m 5:
-[[HALLU:1]] ... de foutieve zin ... [[/HALLU:1]]
-[[HALLU:2]] ... de foutieve zin ... [[/HALLU:2]]
-... enzovoort tot en met 5. Gebruik elk nummer (1 t/m 5) precies één keer. Alles wat je in de JSON noemt MOET tussen [[HALLU:n]]...[[/HALLU:n]] in de tekst staan.
-
-CONTROLE VOORDAT JE KLAAR BENT (doe dit echt):
-- Bevat elke gemarkeerde zin het verplichte kenmerk van zijn type (een getal / plaatsnaam / persoonsnaam / citaat / afkorting / jaartal)?
-- Is elke zin een hard feit dat OVERDUIDELIJK onwaar is volgens algemeen bekende kennis?
-- Verschilt "correct" duidelijk van de foutieve zin?
-Klopt iets niet? Herschrijf die zin voordat je antwoordt.
-
-UITVOER — VOLG DIT FORMAAT EXACT:
-Geef EERST de volledige lestekst in markdown, beginnend bij "## Introductie" (geen inleidende zin, geen codeblokken), met daarin de 5 zinnen tussen [[HALLU:1]]...[[/HALLU:1]] t/m [[HALLU:5]]...[[/HALLU:5]].
-Schrijf DAARNA op een nieuwe regel exact deze scheidingsregel:
-===HALLUCINATIES_JSON===
-Schrijf DAARNA een geldige JSON-array met PRECIES 5 objecten, één per hallucinatie. In de JSON zet je NIET de foutieve zin zelf (die staat al tussen de markeringen in de tekst), maar alleen:
-- "id": het nummer van de markering (1 t/m 5) waar deze hallucinatie staat.
-- "type": de naam van het type, EXACT in het Engels zoals hierboven (bijv. "Numeric Nuisance").
-- "correct": het echte feit (duidelijk anders dan de foutieve zin).
-Voorbeeld van het JSON-deel:
-===HALLUCINATIES_JSON===
-[
-  {"id":1,"type":"Numeric Nuisance","correct":"Engeland heeft ongeveer 56 miljoen inwoners."},
-  {"id":2,"type":"Geographic Erratum","correct":"De hoofdstad van Engeland is Londen."}
-]
-Geef na de JSON-array niets meer.`
+UITVOER:
+Geef ALLEEN de lestekst terug in markdown, beginnend bij "## Introductie". Geen inleidende zin, geen afsluitende opmerking, geen codeblokken, geen JSON.`
 
     const userPrompt = `Onderwerp / titel van de les: ${onderwerp}
 Doelgroep: ${doelgroepStr || 'niet gespecificeerd'}
@@ -1065,6 +1085,7 @@ Leertaxonomie: ${taxonomieLine}
 Lesduur: 30 minuten`
 
     try {
+      // ── STEP 1: generate a clean, correct lesson ───────────────────────────
       const res = await fetch('https://api.cohere.com/v2/chat', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
@@ -1080,87 +1101,82 @@ Lesduur: 30 minuten`
       })
       if (!res.ok) { const e = await res.text().catch(() => ''); throw new Error(`Cohere ${res.status}: ${e}`) }
       const data = await res.json()
-      let raw: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
+      let cleanRaw: string = data?.message?.content?.[0]?.text ?? data?.text ?? ''
 
-      // ── 1. Separate the lesson text from the machine-readable report ────────
-      let text = raw
-      const jsonById: Record<string, { type?: string; correct?: string; ingevoegd?: string }> = {}
-      let jsonArr: any[] = []
-      const jsonMarkerIdx = raw.search(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i)
-      if (jsonMarkerIdx !== -1) {
-        text = raw.slice(0, jsonMarkerIdx)
-        const jsonPart = raw.slice(jsonMarkerIdx).replace(/={2,}\s*HALLUCINATIES_JSON\s*={2,}/i, '')
-        const arrMatch = jsonPart.match(/\[[\s\S]*\]/)
-        if (arrMatch) {
-          try {
-            const parsed = JSON.parse(arrMatch[0])
-            if (Array.isArray(parsed)) {
-              jsonArr = parsed
-              for (const h of parsed) {
-                if (h && typeof h === 'object' && h.id != null) jsonById[String(h.id)] = h
-              }
-            }
-          } catch { /* malformed JSON → rely on inline markers / fallback */ }
-        }
-      }
+      // Strip fences / preamble and start exactly at the first anchor.
+      let cleanText = cleanRaw.replace(/```[a-z]*\n?/gi, '').trim()
+      const ci = cleanText.indexOf('## Introductie')
+      if (ci > 0) cleanText = cleanText.slice(ci)
+      cleanText = cleanText.trim()
 
-      // ── 2. Pull each hallucination's sentence directly OUT OF the lesson ────
-      // The sentence is taken from the text itself (between [[HALLU:n]] markers),
-      // so what we report is guaranteed to be present in the lesson — we never
-      // trust the model to re-type it. The JSON only supplies type + correct.
-      const found: { id: string; ingevoegd: string }[] = []
-      const markerRe = /\[\[HALLU:(\d+)\]\]([\s\S]*?)\[\[\/HALLU:\1\]\]/g
-      let mm: RegExpExecArray | null
-      while ((mm = markerRe.exec(text)) !== null) {
-        const inner = mm[2].replace(/\s+/g, ' ').trim()
-        if (inner) found.push({ id: mm[1], ingevoegd: inner })
-      }
-
-      // ── 3. Remove the markers so the lesson reads cleanly (sentence stays) ──
-      text = text
-        .replace(/\[\[\/?HALLU:\d+\]\]/g, '')
-        .replace(/[ \t]{2,}/g, ' ')
-        .replace(/[ \t]+([.,!?;:])/g, '$1')
-
-      // Strip any stray fences / preamble and start exactly at the first anchor.
-      text = text.replace(/```[a-z]*\n?/gi, '').trim()
-      const idx = text.indexOf('## Introductie')
-      if (idx > 0) text = text.slice(idx)
-      text = text.trim()
-
-      // ── 4. Build the hallucination list ─────────────────────────────────────
-      let hallucinations: { type: string; ingevoegd: string; correct: string }[] = found.map(f => ({
-        type: String(jsonById[f.id]?.type ?? '').trim(),
-        ingevoegd: f.ingevoegd,
-        correct: String(jsonById[f.id]?.correct ?? '').trim(),
-      }))
-      // Fallback: if the model forgot the markers but still listed sentences in
-      // the JSON, keep only those that actually appear in the lesson text.
-      if (hallucinations.length === 0 && jsonArr.length > 0) {
-        hallucinations = jsonArr
-          .filter(h => h && typeof h === 'object' && h.ingevoegd)
-          .map(h => ({
-            type: String(h.type ?? '').trim(),
-            ingevoegd: String(h.ingevoegd).trim(),
-            correct: String(h.correct ?? '').trim(),
-          }))
-      }
-
-      // ── 5. Final guarantee: drop anything not literally in the lesson ───────
-      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
-      const haystack = norm(text)
-      hallucinations = hallucinations.filter(h => h.ingevoegd && haystack.includes(norm(h.ingevoegd)))
-
-      const blocks = parsePhaseBlocks(text)
+      const cleanBlocks = parsePhaseBlocks(cleanText)
       const hasContent = (['introductie', 'instructie', 'verwerking', 'afronding'] as OutlinePhase[])
-        .some(p => blocks[p].length > 0)
-      if (!text || !hasContent) throw new Error('Onvolledige lesinhoud ontvangen')
+        .some(p => cleanBlocks[p].length > 0)
+      if (!cleanText || !hasContent) throw new Error('Onvolledige lesinhoud ontvangen')
 
-      setLesText(text)
+      // ── STEP 2: ask only for find-and-replace hallucination edits ──────────
+      const injectorSystem = `Je krijgt een bestaande, correcte lestekst. Je taak is NIET om de les te herschrijven, maar om een lijst te maken van 5 opzettelijke feitelijke FOUTEN ("hallucinaties") die wij daarna in de les zullen verwerken. Dit hoort bij een wetenschappelijk experiment.
+
+Je geeft voor ELK van de 6 onderstaande types één fout (dus 6 edits in totaal; wij gebruiken er 5). Elke edit is een JSON-object met exact deze 4 sleutels:
+- "type": exact één van: "Numeric Nuisance", "Acronym Ambiguity", "Generated Golem", "Virtual Voice", "Geographic Erratum", "Time Wrap".
+- "zoek": een COMPLETE zin die LETTERLIJK, woord voor woord (inclusief leestekens), in de lestekst voorkomt. Kopieer hem exact uit de les. Verzin GEEN zin die er niet in staat.
+- "vervang": precies diezelfde zin, maar met de fout erin verwerkt. Verander zo min mogelijk — voeg één onjuist feit toe of vervang één detail; de rest van de zin blijft identiek.
+- "correct": het echte feit, in één korte zin.
+
+WANNEER IS EEN FOUT GOED (hier ging het eerder mis — lees goed):
+- "vervang" moet duidelijk VERSCHILLEN van "zoek" en een HARD, CONTROLEERBAAR feit bevatten dat OVERDUIDELIJK ONWAAR is volgens algemeen bekende kennis. Een gemiddelde lezer moet de fout meteen zien.
+- GEEN meningen, GEEN vage toevoegingen, GEEN extra woorden zonder echte onwaarheid. Als "vervang" alleen wat woorden toevoegt zonder een duidelijk verkeerd feit, is het FOUT.
+- Gebruik bekende feiten (hoofdsteden, inwonertallen, bekende jaartallen/personen/afkortingen). Geen obscure kennis.
+- Schrijf "zoek", "vervang" en "correct" in dezelfde taal als de lestekst.
+
+VERPLICHT KENMERK PER TYPE — dit MOET letterlijk in "vervang" staan:
+- Numeric Nuisance → een concreet GETAL in cijfers dat overduidelijk verkeerd is (bv. "ongeveer 2 miljoen inwoners" terwijl het er 56 miljoen zijn).
+- Geographic Erratum → een PLAATSNAAM op de verkeerde plek (bv. "De hoofdstad van Engeland is Manchester").
+- Generated Golem → een verzonnen PERSOONSNAAM als bron/autoriteit (bv. "Volgens expert dr. Pieter van Dalen ...").
+- Virtual Voice → een CITAAT tussen aanhalingstekens, toegeschreven aan een bekend persoon die het nooit zei.
+- Acronym Ambiguity → een AFKORTING met een verkeerde voluit-schrijving tussen haakjes (bv. "BSN (Brits Sociaal Nummer)").
+- Time Wrap → een gebeurtenis in het verkeerde JAAR/tijdperk, met een jaartal in cijfers (bv. "de Brexit in 1980").
+
+UITVOER: geef ALLEEN een geldige JSON-array met 6 objecten (één per type). Geen uitleg, geen codeblok, niets anders dan de JSON-array. Voorbeeld van het formaat:
+[
+  {"type":"Numeric Nuisance","zoek":"<bestaande zin uit de les>","vervang":"<dezelfde zin met een fout getal>","correct":"<echt feit>"}
+]`
+
+      let hallucinations: { type: string; ingevoegd: string; correct: string }[] = []
+      let finalText = cleanText
+      try {
+        const res2 = await fetch('https://api.cohere.com/v2/chat', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${COHERE_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'command-r-08-2024',
+            messages: [
+              { role: 'system', content: injectorSystem },
+              { role: 'user', content: cleanText },
+            ],
+            max_tokens: 2000,
+            temperature: 0.4,
+          }),
+        })
+        if (res2.ok) {
+          const data2 = await res2.json()
+          const raw2: string = data2?.message?.content?.[0]?.text ?? data2?.text ?? ''
+          const arrMatch = raw2.replace(/```[a-z]*\n?/gi, '').match(/\[[\s\S]*\]/)
+          if (arrMatch) {
+            const edits = JSON.parse(arrMatch[0])
+            const applied = applyHallucinationEdits(cleanText, edits)
+            finalText = applied.text
+            hallucinations = applied.hallucinations
+          }
+        }
+      } catch { /* if injection fails, fall through with the clean lesson */ }
+
+      const blocks = parsePhaseBlocks(finalText)
+      setLesText(finalText)
       setPhaseBlocks(blocks)
       setInjectedHallucinations(hallucinations)
-      // Baseline for the edit-tier comparison = the lesson exactly as generated.
-      setGeneratedBaseline(text)
+      // Baseline for the edit-tier comparison = the lesson exactly as shown.
+      setGeneratedBaseline(finalText)
     } catch {
       // Safety net: fall back to the static lesson so the flow never stalls.
       setLesText(EXPERIMENT_TEXT)
