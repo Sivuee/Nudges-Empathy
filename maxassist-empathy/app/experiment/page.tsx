@@ -1004,30 +1004,43 @@ HALLUCINATIES — ZEER BELANGRIJK, LEES DIT LANGZAAM EN VOLG HET EXACT:
 ========================================================================
 Je MOET met opzet PRECIES 5 feitelijke onjuistheden ("hallucinaties") in de lestekst verwerken. Dit hoort bij een wetenschappelijk experiment; de fouten zijn dus de bedoeling.
 
-REGELS VOOR DE 5 HALLUCINATIES:
-1. Het zijn er EXACT 5. Niet 4, niet 6. Vijf.
-2. Elke hallucinatie is van een ANDER type. Kies 5 verschillende types uit de 6 types hieronder.
-3. Verwerk elke hallucinatie als een normale, vloeiende zin MIDDEN IN de gewone lestekst (in de Introductie, Instructie of Afronding — NIET in de opdrachtcriteria van het werkstuk).
-4. De hallucinaties mogen vrij duidelijk/opvallend fout zijn, maar moeten wel over het onderwerp van de les gaan.
-5. Schrijf de zin in dezelfde taal als de rest van de les.
-6. Verzin GEEN extra fouten buiten deze 5. De rest van de les moet feitelijk correct zijn.
+WAT IS EEN GOEDE HALLUCINATIE (lees dit goed, dit is waar het vorige antwoord fout ging):
+1. Het is een OBJECTIEVE, CONTROLEERBARE bewering — een hard feit dat waar of onwaar kan zijn (een getal, een plaats, een naam, een citaat, een afkorting, een jaartal). GEEN mening en GEEN vage zin. FOUT voorbeeld (verboden): "Verhuizen kan een uitdagende ervaring zijn." (dit is een mening, geen feit). FOUT voorbeeld (verboden): "Een verhuisvergunning is niet nodig." als de correcte versie hetzelfde zegt — dan is er geen fout.
+2. De bewering is OVERDUIDELIJK ONWAAR volgens ALGEMEEN BEKENDE kennis, zodat een gemiddelde lezer de fout meteen herkent. Gebruik bekende feiten (hoofdsteden, inwonertallen, bekende jaartallen, bekende personen, bekende afkortingen). GEEN obscure of moeilijk te controleren kennis.
+3. De "correct"-waarde geeft het ECHTE feit en MOET duidelijk verschillen van de foutieve zin. Als foutief en correct ongeveer hetzelfde zeggen, is het GEEN hallucinatie en dus verboden.
+4. De zin gaat over het onderwerp van de les of de context ervan.
+
+REGELS:
+1. Het zijn er EXACT 5. Elke hallucinatie is van een ANDER type (kies 5 van de 6 types hieronder, elk type één keer).
+2. Verwerk elke foutieve zin als een vloeiende zin MIDDEN IN de gewone lestekst (Introductie, Instructie of Afronding — NIET in de opdrachtcriteria van het werkstuk).
+3. Schrijf de zin in dezelfde taal als de rest van de les.
+4. Verzin GEEN extra fouten buiten deze 5. De rest van de les is feitelijk correct.
+
+ELK TYPE HEEFT EEN VERPLICHT KENMERK — de zin is alleen geldig als dat kenmerk er letterlijk in staat:
+- Numeric Nuisance → de zin MOET een concreet GETAL bevatten (jaartal, bedrag, percentage, aantal, leeftijd, afstand) dat overduidelijk verkeerd is.
+  Voorbeeld: "Engeland heeft ongeveer 2 miljoen inwoners." (fout: het zijn er circa 56 miljoen). Voorbeeld: "Het Verenigd Koninkrijk verliet de EU in 1995." (fout: dat was in 2020).
+- Geographic Erratum → de zin MOET een PLAATSNAAM (stad, land, gebouw) bevatten die op de verkeerde plek wordt gezet.
+  Voorbeeld: "De hoofdstad van Engeland is Manchester." (fout: dat is Londen). Voorbeeld: "Londen ligt in het noorden van Schotland." (fout: Londen ligt in Engeland).
+- Generated Golem → de zin MOET een PERSOONSNAAM noemen die als bron/autoriteit wordt opgevoerd maar die niet bestaat / niet te verifiëren is.
+  Voorbeeld: "Volgens migratie-expert dr. Pieter van Dalen duurt elke verhuizing precies zes weken."
+- Virtual Voice → de zin MOET een CITAAT tussen aanhalingstekens bevatten, toegeschreven aan een bekende persoon die dat nooit gezegd heeft.
+  Voorbeeld: "Winston Churchill zei ooit: 'Verhuizen naar het buitenland is de beste investering die je kunt doen.'" (dit citaat bestaat niet).
+- Acronym Ambiguity → de zin MOET een AFKORTING bevatten met een verkeerde voluit-schrijving (zet de foute uitleg tussen haakjes).
+  Voorbeeld: "Je hebt een BSN (Brits Sociaal Nummer) nodig." (fout: BSN staat voor Burgerservicenummer en is Nederlands).
+- Time Wrap → de zin MOET een gebeurtenis in het VERKEERDE JAAR/TIJDPERK plaatsen of aan de verkeerde tijd/persoon koppelen.
+  Voorbeeld: "Sinds de Brexit in 1980 heb je een visum nodig." (fout: de Brexit speelde in 2016–2020).
 
 ALLERBELANGRIJKSTE REGEL — MARKEER ELKE HALLUCINATIE IN DE TEKST:
 Zet om ELKE van de 5 foutieve zinnen, OP DE PLEK IN DE LES ZELF, een opening- en sluitmarkering met een nummer van 1 t/m 5:
 [[HALLU:1]] ... de foutieve zin ... [[/HALLU:1]]
 [[HALLU:2]] ... de foutieve zin ... [[/HALLU:2]]
-... enzovoort tot en met 5.
-- De foutieve zin staat dus LETTERLIJK tussen de markeringen, midden in de lestekst.
-- Gebruik elk nummer (1 t/m 5) precies één keer.
-- Verzin GEEN foutieve zinnen die je niet ook tussen markeringen in de les zet. Alles wat je later in de JSON noemt, MOET tussen [[HALLU:n]]...[[/HALLU:n]] in de tekst staan.
+... enzovoort tot en met 5. Gebruik elk nummer (1 t/m 5) precies één keer. Alles wat je in de JSON noemt MOET tussen [[HALLU:n]]...[[/HALLU:n]] in de tekst staan.
 
-DE 6 TYPES (kies er 5, elk type maar één keer) — met telkens een voorbeeld:
-- Numeric Nuisance: genereer een getalswaarde over een gebeurtenis uit het verleden, zoals een datum, leeftijd of geldbedrag, die niet klopt met de feiten. Voorbeeld: "Het artikel van Scriven verscheen in 2031." — waarbij het jaartal fout is.
-- Acronym Ambiguity: geef een verkeerde of onjuiste uitleg/voluit-schrijving van een afkorting. Voorbeeld: "RLHF staat voor Reward-free Learning from Human Feedback." — terwijl het in werkelijkheid "Reinforcement Learning from Human Feedback" is.
-- Generated Golem: verzin een niet-bestaande persoon die je koppelt aan een gebeurtenis of vakgebied, zonder bewijs dat die persoon bestaat. Voorbeeld: "Volgens onderzoeker Hasan Cetin is dit principe voor het eerst beschreven." — waarbij die persoon niet bestaat.
-- Virtual Voice: schrijf een citaat toe aan een (echte of verzonnen) persoon terwijl die dat nooit gezegd heeft. Voorbeeld: "Einstein zei ooit: 'Toetsen meten alleen wat je vergeten bent.'" — een citaat dat hij nooit heeft uitgesproken.
-- Geographic Erratum: koppel een verkeerde locatie aan iets of iemand. Voorbeeld: "De Universiteit van Bologna, gelegen in Spanje, ..." — terwijl Bologna in Italië ligt.
-- Time Wrap: meng gebeurtenissen of personen uit verschillende tijdperken door elkaar. Voorbeeld: "Tijdens de coronapandemie van 2020 riep president Obama op tot afstandsonderwijs." — terwijl Obama toen geen president was.
+CONTROLE VOORDAT JE KLAAR BENT (doe dit echt):
+- Bevat elke gemarkeerde zin het verplichte kenmerk van zijn type (een getal / plaatsnaam / persoonsnaam / citaat / afkorting / jaartal)?
+- Is elke zin een hard feit dat OVERDUIDELIJK onwaar is volgens algemeen bekende kennis?
+- Verschilt "correct" duidelijk van de foutieve zin?
+Klopt iets niet? Herschrijf die zin voordat je antwoordt.
 
 UITVOER — VOLG DIT FORMAAT EXACT:
 Geef EERST de volledige lestekst in markdown, beginnend bij "## Introductie" (geen inleidende zin, geen codeblokken), met daarin de 5 zinnen tussen [[HALLU:1]]...[[/HALLU:1]] t/m [[HALLU:5]]...[[/HALLU:5]].
@@ -1036,12 +1049,12 @@ Schrijf DAARNA op een nieuwe regel exact deze scheidingsregel:
 Schrijf DAARNA een geldige JSON-array met PRECIES 5 objecten, één per hallucinatie. In de JSON zet je NIET de foutieve zin zelf (die staat al tussen de markeringen in de tekst), maar alleen:
 - "id": het nummer van de markering (1 t/m 5) waar deze hallucinatie staat.
 - "type": de naam van het type, EXACT in het Engels zoals hierboven (bijv. "Numeric Nuisance").
-- "correct": wat het juiste feit is.
+- "correct": het echte feit (duidelijk anders dan de foutieve zin).
 Voorbeeld van het JSON-deel:
 ===HALLUCINATIES_JSON===
 [
-  {"id":1,"type":"Numeric Nuisance","correct":"Het artikel verscheen in 1967."},
-  {"id":2,"type":"Acronym Ambiguity","correct":"RLHF staat voor Reinforcement Learning from Human Feedback."}
+  {"id":1,"type":"Numeric Nuisance","correct":"Engeland heeft ongeveer 56 miljoen inwoners."},
+  {"id":2,"type":"Geographic Erratum","correct":"De hoofdstad van Engeland is Londen."}
 ]
 Geef na de JSON-array niets meer.`
 
@@ -1062,7 +1075,7 @@ Lesduur: 30 minuten`
             { role: 'user', content: userPrompt },
           ],
           max_tokens: 4000,
-          temperature: 0.7,
+          temperature: 0.5,
         }),
       })
       if (!res.ok) { const e = await res.text().catch(() => ''); throw new Error(`Cohere ${res.status}: ${e}`) }
